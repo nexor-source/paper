@@ -19,17 +19,20 @@ class ContextSpacePartition:
         self.estimated_quality = 0.0      # 该区域内任务副本的平均完成质量估计
         self.children = None              # 子划分列表，未细分时为None
     
-    def contains(self, context):
-        """
-        :param context: 归一化上下文向量,shape=(d,)
-        :return: 判断该上下文是否在当前划分区域内
+    def contains(self, context:np.ndarray) -> bool:
+        """ 判断上下文是否在该划分区域内
+        Args:
+            context (np.ndarray,shape=(d,)): 归一化上下文向量
+
+        Returns:
+            bool: 上下文是否在当前划分区域内
         """
         EPS = 1e-8  # 容忍边界浮点误差
         return all(self.bounds[d][0] <= context[d] < self.bounds[d][1] or
                 abs(context[d] - self.bounds[d][1]) < EPS  # 允许等于上界
                 for d in range(len(context)))
 
-    def update_statistics(self, reward: float):
+    def update_reward(self, reward: float):
         """
         根据观察到的副本完成奖励更新该区域的样本计数和平均质量估计
         :param reward: 当前副本任务完成奖励，通常0或1
@@ -163,17 +166,16 @@ class TaskReplicator:
                         break
         return selected
     
-    def update_statistics(self, selected_assignments: List[Assignment], rewards: dict):
+    def update_assignments_reward(self, selected_assignments: List[Assignment], rewards: dict):
         """
-        更新对应上下文划分的质量估计与样本计数，
-        达到阈值后自动细分上下文空间以细化估计
+        更新选择的assignments对应的reward并判断细分
         :param selected_assignments: 被选中的工人-任务对
         :param rewards: dict{Assignment: reward}，任务完成奖励，0或1
         """
         for a in selected_assignments:
             p = self.root_partition.find_partition(a.context)
             reward = rewards.get(a, 0)
-            p.update_statistics(reward)
+            p.update_reward(reward)
             # 样本数达到阈值后进行二分细分
             if p.sample_count >= self.initial_partition_size:
                 p.subdivide()
@@ -206,4 +208,4 @@ if __name__ == "__main__":
     rewards = {a: np.random.binomial(1, 0.5) for a in selected}
     
     # 更新统计
-    replicator.update_statistics(selected, rewards)
+    replicator.update_assignments_reward(selected, rewards)

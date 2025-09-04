@@ -100,7 +100,7 @@ class Scheduler:
             rewards[a] = np.random.binomial(1, 0.6)  # 60%成功率示例
         
         # 6. 更新统计
-        self.replicator.update_statistics(selected_assignments, rewards)
+        self.replicator.update_assignments_reward(selected_assignments, rewards)
         
         print(f"Time {self.time}: Scheduled {len(selected_assignments)} assignments from {len(tasks_to_schedule)} tasks")
         self.time += 1

@@ -8,24 +8,26 @@ class ContextSpacePartition:
     支持 [动态二分细分] 以 [细化学习] 。
     """
     def __init__(self, bounds: List[Tuple[float, float]], depth: int = 0):
-        """
-        初始化上下文划分区域
-        :param bounds: 每个维度的区间，如[(min, max), (min, max), ...],shape=(d,2)
-        :param depth: 当前划分层级，根节点depth=0
+        """初始化上下文划分区域
+
+        Args:
+            bounds (List[Tuple[float, float]]): 每个维度的区间，如[(min, max), ...]，shape=(d, 2)。
+            depth (int, optional): 当前划分层级，根节点为0。默认为0。
         """
         self.bounds = bounds    # 每个维度的区间列表
-        self.depth = depth         # 当前划分层级
-        self.sample_count = 0              # 该区域被采样的次数（副本被选中次数）
-        self.estimated_quality = 0.0      # 该区域内任务副本的平均完成质量估计
-        self.children = None              # 子划分列表，未细分时为None
+        self.depth = depth      # 当前划分层级
+        self.sample_count = 0   # 该区域被采样的次数
+        self.estimated_quality = 0.0  # 该区域内任务副本的平均完成质量估计
+        self.children = None    # 子划分列表，未细分时为None
     
-    def contains(self, context:np.ndarray) -> bool:
-        """ 判断上下文是否在该划分区域内
+    def contains(self, context: np.ndarray) -> bool:
+        """判断上下文是否在该划分区域内
+
         Args:
-            context (np.ndarray,shape=(d,)): 归一化上下文向量
+            context (np.ndarray, shape=(d,)): 归一化上下文向量。
 
         Returns:
-            bool: 上下文是否在当前划分区域内
+            bool: 上下文是否在当前划分区域内。
         """
         EPS = 1e-8  # 容忍边界浮点误差
         return all(self.bounds[d][0] <= context[d] < self.bounds[d][1] or
@@ -33,18 +35,20 @@ class ContextSpacePartition:
                 for d in range(len(context)))
 
     def update_reward(self, reward: float):
-        """
-        根据观察到的副本完成奖励更新该区域的样本计数和平均质量估计
-        :param reward: 当前副本任务完成奖励，通常0或1
+        """根据观察到的副本完成奖励更新该区域的样本计数和平均质量估计
+
+        Args:
+            reward (float): 当前副本任务完成奖励，通常取0或1。
         """
         self.sample_count += 1
-        # 使用滑动平均更新估计质量，保证数值稳定
         self.estimated_quality = ((self.estimated_quality * (self.sample_count - 1)) + reward) / self.sample_count
     
     def subdivide(self):
-        """
-        将该划分区域沿每个维度中点二分，产生2^d个子区域，
-        细化划分以提升估计的精度和灵活性
+        """将该划分区域沿每个维度中点二分，产生 2^d 个子区域
+
+        Notes:
+            - 若该区域已被细分，则不再重复细分。
+            - 每次细分会更新 `children` 列表。
         """
         if self.children is not None:
             # 如果这个partition已细分则不再细分
@@ -66,23 +70,21 @@ class ContextSpacePartition:
                 else:
                     new_bounds.append((midpoints[d], self.bounds[d][1]))
             new_bounds_list.append(new_bounds)
-        
         # 创建子划分对象列表
         self.children = [ContextSpacePartition(b, self.depth + 1) for b in new_bounds_list]
     
     def find_partition(self, context: np.ndarray):
-        """
-        递归寻找包含指定上下文的最底层划分区域（叶节点）
-        :param context: 归一化上下文向量,shape=(d,)
-        :return: 对应的叶节点 ContextSpacePartition 对象
-        """
-        # print("Current partition bounds:")
-        # if self.children: 
-        #     for child in self.children:
-        #         print(" ", child.bounds)
-        #         print("Incoming context:", context)
-        
+        """递归寻找包含指定上下文的最底层划分区域（叶节点）
 
+        Args:
+            context (np.ndarray, shape=(d,)): 归一化上下文向量。
+
+        Returns:
+            ContextSpacePartition: 对应的叶节点对象。
+
+        Raises:
+            ValueError: 当上下文不在任何子划分内时抛出。
+        """
         if self.children is None:
             return self
         for child in self.children:
@@ -93,41 +95,59 @@ class ContextSpacePartition:
 class Assignment:
     """
     表示一个工人-任务对，封装对应的上下文信息，
-    是调度系统中任务分配的基本单位
+    是调度系统中任务分配的基本单位。
     """
     def __init__(self, worker_id: int, task_id: int, context: np.ndarray):
+        """初始化 Assignment
+
+        Args:
+            worker_id (int): 工人 ID。
+            task_id (int): 任务 ID。
+            context (np.ndarray, shape=(d,)): 归一化后的上下文特征向量。
+        """
         self.worker_id = worker_id
         self.task_id = task_id
-        self.context = context  # 归一化后的上下文特征向量
+        self.context = context
 
 class TaskReplicator:
     """
     任务分配器，基于上下文划分估计副本质量，
     利用匈牙利算法实现任务-工人最大收益匹配，
-    动态细分上下文划分空间保证长期学习精度
+    动态细分上下文划分空间保证长期学习精度。
     """
     def __init__(self, context_dim: int, initial_partition_size: int, budget: int, replication_cost: float):
+        """初始化任务分配器
+
+        Args:
+            context_dim (int): 上下文向量维度 d。
+            initial_partition_size (int): 划分细分的阈值（样本数达到时细分）。
+            budget (int): 每个任务允许的最大副本数。
+            replication_cost (float): 每次分配的成本。
+        """
         self.context_dim = context_dim
-        self.budget = budget  # 每个任务允许的最大副本数，代码中假设每个任务只给一个worker分配
+        self.budget = budget
         self.replication_cost = replication_cost
         
         # 初始化根划分，单位超立方体[0,1]^d
         self.root_partition = ContextSpacePartition(bounds=[(0,1)]*context_dim)
-        self.partitions = [self.root_partition]  # 当前所有叶子划分
-        self.initial_partition_size = initial_partition_size  # 细分阈值
+        self.partitions = [self.root_partition]
+        self.initial_partition_size = initial_partition_size
     
     def select_assignments(self, candidate_assignments: List[Assignment]):
-        """
-        对给定候选工人-任务对，选择一组最优匹配副本
-        :param candidate_assignments: 所有候选分配方案列表,shape=(n,)
-        :return: 选中的 [工人-任务] 分配列表,shape=(m,)
+        """对候选工人-任务对进行最优匹配选择
+
+        Args:
+            candidate_assignments (List[Assignment]): 候选工人-任务对列表，长度 n。
+
+        Returns:
+            List[Assignment]: 选中的工人-任务分配列表，长度 m。
         """
         # 建立映射 map{Assignment: ContextSpacePartition}
         partition_map = {a: self.root_partition.find_partition(a.context) for a in candidate_assignments}
         
         # 获得所有任务与工人的id集合
-        task_ids = sorted(set(a.task_id for a in candidate_assignments))    # 任务id set
-        worker_ids = sorted(set(a.worker_id for a in candidate_assignments))    # 工人id set
+        task_ids = sorted(set(a.task_id for a in candidate_assignments))
+        worker_ids = sorted(set(a.worker_id for a in candidate_assignments))
         # 将任务和工人的id重新映射为矩阵索引(0~n-1)
         task_idx = {task: i for i, task in enumerate(task_ids)}  
         worker_idx = {worker: j for j, worker in enumerate(worker_ids)}
@@ -167,10 +187,14 @@ class TaskReplicator:
         return selected
     
     def update_assignments_reward(self, selected_assignments: List[Assignment], rewards: dict):
-        """
-        更新选择的assignments对应的reward并判断细分
-        :param selected_assignments: 被选中的工人-任务对
-        :param rewards: dict{Assignment: reward}，任务完成奖励，0或1
+        """更新选中分配的奖励并判断是否细分
+
+        Args:
+            selected_assignments (List[Assignment]): 被选中的工人-任务对。
+            rewards (dict): 奖励字典，键为 Assignment，值为奖励 (0 或 1)。
+
+        Notes:
+            - 当样本数达到阈值 `initial_partition_size` 时会进行二分细分。
         """
         for a in selected_assignments:
             p = self.root_partition.find_partition(a.context)
@@ -186,11 +210,10 @@ class TaskReplicator:
 if __name__ == "__main__":
     # 参数定义
     context_dim = 7
-    budget = 1  # 每任务唯一worker分配
+    budget = 1
     initial_partition_size = 10
     replication_cost = 0.1
     
-    # 初始化调度器
     replicator = TaskReplicator(context_dim, initial_partition_size, budget, replication_cost)
     
     # 生成模拟候选工人-任务对，随机上下文
@@ -206,6 +229,5 @@ if __name__ == "__main__":
     
     # 模拟奖励观测，0或1随机
     rewards = {a: np.random.binomial(1, 0.5) for a in selected}
-    
     # 更新统计
     replicator.update_assignments_reward(selected, rewards)

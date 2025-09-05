@@ -160,16 +160,52 @@ class Scheduler:
                 raw_context = {
                     "driving_speed": worker.driving_speed,
                     "bandwidth": worker.bandwidth,
-                    "processor_performance": worker.processor_perf,
-                    "physical_distance": worker.physical_distance,
-                    "task_type": task.task_type,
-                    "data_size": task.data_size,
-                    "weather": worker.weather,
+                    # "processor_performance": worker.processor_perf,
+                    # "physical_distance": worker.physical_distance,
+                    # "task_type": task.task_type,
+                    # "data_size": task.data_size,
+                    # "weather": worker.weather,
                 }
                 norm_context = self.normalizer.normalize_context(raw_context)
                 assignment = Assignment(worker.worker_id, task.task_id, norm_context)
                 candidates.append(assignment)
         return candidates
+
+    def evaluate_reward(self, context: np.ndarray) -> float:
+        """根据 context 向量计算成功概率
+        
+        Args:
+            context (np.ndarray): 归一化上下文向量，shape=(d,)
+        
+        Returns:
+            float: 成功概率 p ∈ [0,1]
+        """
+        # 示例规则：速度、带宽、处理器性能高 → 概率高
+        #           距离、数据量大 → 概率低
+        # 权重可以按需调整
+        driving_speed = context[0] if len(context) > 0 else 0
+        bandwidth = context[1] if len(context) > 1 else 0
+        processor_perf = context[2] if len(context) > 2 else 0
+        distance = context[3] if len(context) > 3 else 0
+        task_type = context[4] if len(context) > 4 else 0
+        data_size = context[5] if len(context) > 5 else 0
+        weather = context[6] if len(context) > 6 else 0
+        
+        # 一个线性组合示例（权重可调）
+        score = (
+            0.3 * driving_speed
+            + 0.25 * bandwidth
+            + 0.2 * processor_perf
+            - 0.15 * distance
+            - 0.1 * data_size
+        )
+        # 天气的简单影响（越差越扣分）
+        score -= 0.05 * weather  
+
+        # Sigmoid 压缩到 (0,1)
+        p = 1 / (1 + np.exp(-score * 5))  # 乘系数调整斜率
+        return float(np.clip(p, 0.01, 0.99))  # 保证不为0或1
+
 
     def step(self, new_tasks: List[Task], batch_size: int) -> None:
         """执行一次调度时间步：入队新任务、批量选择、匹配与反馈更新
@@ -205,7 +241,11 @@ class Scheduler:
         # 5. 模拟执行和奖励（这里用随机模拟，真实场景由系统反馈）
         rewards: Dict[Assignment, float] = {}
         for a in selected_assignments:
-            rewards[a] = np.random.binomial(1, 0.6)  # 60% 成功率示例
+            # 自定义线性成功率
+            print(a.context)
+            p = self.evaluate_reward(a.context)
+            # 模拟成功与否
+            rewards[a] = np.random.binomial(1, p)
 
         # 6. 更新统计
         self.replicator.update_assignments_reward(selected_assignments, rewards)
@@ -241,7 +281,7 @@ if __name__ == "__main__":
     normalizer = ContextNormalizer()
     # 注意：此处的构造参数名与实现保持一致（例如 partition_split_threshold）
     replicator = TaskReplicator(
-        context_dim=7,
+        context_dim=2,
         partition_split_threshold=10,
         budget=1,
         replication_cost=0.1,
@@ -249,7 +289,7 @@ if __name__ == "__main__":
     scheduler = Scheduler(workers, normalizer, replicator)
 
     # 模拟任务流，多轮调度
-    for step_i in range(10):
+    for step_i in range(20):
         # 模拟每步新任务到达：任务类型 0~9 随机，数据大小 100~3000MB，deadline 1~3 秒
         new_tasks: List[Task] = []
         for _ in range(np.random.randint(2, 5)):
@@ -263,7 +303,8 @@ if __name__ == "__main__":
         # 展示各 partition 的样本数
         print(f"Step {step_i}: Current Partitions and Sample Counts:")
         for partition in replicator.partitions:
-            print(f"Partition {partition.bounds}: Sample Count = {partition.sample_count}")
+            if partition.sample_count > 0:
+                print(f"Partition {partition.bounds}: Sample Count = {partition.sample_count}")
 
         visualizer = PartitionVisualizer(replicator.partitions)
         visualizer.plot_2d_partitions(dim_x=0, dim_y=1, iteration=step_i)

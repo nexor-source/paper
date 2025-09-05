@@ -6,7 +6,7 @@ from typing import List, Dict
 from normalizer import ContextNormalizer
 from task_replicator import Assignment, TaskReplicator
 from visualizer import PartitionVisualizer
-
+from config import WORKER_FEATURE_VALUES_RANGE
 
 class Task:
     """
@@ -260,9 +260,9 @@ class Scheduler:
 if __name__ == "__main__":
     # 初始化工人资源
     workers = [
-        Worker(0, 12, 100, 3.0, 250, 1),
-        Worker(1, 15, 120, 3.5, 300, 2),
-        Worker(2, 10, 90, 2.5, 100, 0),
+        Worker(0, 25, 800, 3.0, 250, 1),
+        Worker(1, 40, 400, 3.5, 300, 2),
+        Worker(2, 5, 150, 2.5, 100, 0),
         # ...更多工人
     ]
     # 补充到 10 个工人示例
@@ -270,11 +270,11 @@ if __name__ == "__main__":
         workers.append(
             Worker(
                 i,
-                np.random.uniform(5, 20),
-                np.random.uniform(50, 150),
-                np.random.uniform(2, 4),
-                np.random.uniform(100, 400),
-                np.random.randint(0, 5),
+                np.random.uniform(0, WORKER_FEATURE_VALUES_RANGE["driving_speed"][1]),
+                np.random.uniform(0, WORKER_FEATURE_VALUES_RANGE["bandwidth"][1]),
+                np.random.uniform(2, WORKER_FEATURE_VALUES_RANGE["processor_performance"][1]),
+                np.random.uniform(100, WORKER_FEATURE_VALUES_RANGE["data_size"][1]),
+                np.random.randint(0, WORKER_FEATURE_VALUES_RANGE["task_type"][1] + 1),
             )
         )
 

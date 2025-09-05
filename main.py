@@ -115,12 +115,12 @@ class TaskReplicator:
     利用匈牙利算法实现任务-工人最大收益匹配，
     动态细分上下文划分空间保证长期学习精度。
     """
-    def __init__(self, context_dim: int, initial_partition_size: int, budget: int, replication_cost: float):
+    def __init__(self, context_dim: int, partition_split_threshold: int, budget: int = 1, replication_cost: float):
         """初始化任务分配器
 
         Args:
             context_dim (int): 上下文向量维度 d。
-            initial_partition_size (int): 划分细分的阈值（样本数达到时细分）。
+            partition_split_threshold (int): 划分细分的阈值（样本数达到时细分）。
             budget (int): 每个任务允许的最大副本数。
             replication_cost (float): 每次分配的成本。
         """
@@ -131,7 +131,7 @@ class TaskReplicator:
         # 初始化根划分，单位超立方体[0,1]^d
         self.root_partition = ContextSpacePartition(bounds=[(0,1)]*context_dim)
         self.partitions = [self.root_partition]
-        self.initial_partition_size = initial_partition_size
+        self.partition_split_threshold = partition_split_threshold
     
     def select_assignments(self, candidate_assignments: List[Assignment]):
         """对候选工人-任务对进行最优匹配选择
@@ -194,14 +194,14 @@ class TaskReplicator:
             rewards (dict): 奖励字典，键为 Assignment，值为奖励 (0 或 1)。
 
         Notes:
-            - 当样本数达到阈值 `initial_partition_size` 时会进行二分细分。
+            - 当样本数达到阈值 `partition_split_threshold` 时会进行二分细分。
         """
         for a in selected_assignments:
             p = self.root_partition.find_partition(a.context)
             reward = rewards.get(a, 0)
             p.update_reward(reward)
             # 样本数达到阈值后进行二分细分
-            if p.sample_count >= self.initial_partition_size:
+            if p.sample_count >= self.partition_split_threshold:
                 p.subdivide()
                 if p in self.partitions:
                     self.partitions.remove(p)
@@ -209,18 +209,17 @@ class TaskReplicator:
 
 if __name__ == "__main__":
     # 参数定义
-    context_dim = 7
-    budget = 1
-    initial_partition_size = 10
-    replication_cost = 0.1
+    CONTEXT_DIM = 7
+    PARTITION_SPLIT_THRESHOLD = 10
+    REPLICATION_COST = 0.1
     
-    replicator = TaskReplicator(context_dim, initial_partition_size, budget, replication_cost)
+    replicator = TaskReplicator(CONTEXT_DIM, PARTITION_SPLIT_THRESHOLD, budget, REPLICATION_COST)
     
     # 生成模拟候选工人-任务对，随机上下文
     candidates = []
     for w in range(10):
         for task in range(10):
-            ctx = np.random.rand(context_dim)
+            ctx = np.random.rand(CONTEXT_DIM)
             candidates.append(Assignment(w, task, ctx))
     
     # 任务选择

@@ -115,7 +115,7 @@ class TaskReplicator:
     利用匈牙利算法实现任务-工人最大收益匹配，
     动态细分上下文划分空间保证长期学习精度。
     """
-    def __init__(self, context_dim: int, partition_split_threshold: int, budget: int = 1, replication_cost: float):
+    def __init__(self, context_dim: int, partition_split_threshold: int, budget: int, replication_cost: float):
         """初始化任务分配器
 
         Args:
@@ -212,13 +212,15 @@ if __name__ == "__main__":
     CONTEXT_DIM = 7
     PARTITION_SPLIT_THRESHOLD = 10
     REPLICATION_COST = 0.1
+    BUDGET = 1
     
-    replicator = TaskReplicator(CONTEXT_DIM, PARTITION_SPLIT_THRESHOLD, budget, REPLICATION_COST)
+    replicator = TaskReplicator(CONTEXT_DIM, PARTITION_SPLIT_THRESHOLD, BUDGET, REPLICATION_COST)
     
     # 生成模拟候选工人-任务对，随机上下文
     candidates = []
     for w in range(10):
         for task in range(10):
+            # 这里我们直接模拟生成 assignment 的上下文向量，也就是task和worker的组合特征
             ctx = np.random.rand(CONTEXT_DIM)
             candidates.append(Assignment(w, task, ctx))
     

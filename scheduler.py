@@ -4,7 +4,7 @@ from typing import List, Dict
 
 # 你之前定义的 ContextNormalizer, Assignment, TaskReplicator 类这里省略，假设已经实现并导入
 from normalizer import ContextNormalizer
-from main import Assignment, TaskReplicator
+from task_replicator import Assignment, TaskReplicator
 from visualizer import PartitionVisualizer
 
 

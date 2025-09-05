@@ -1,4 +1,5 @@
 import numpy as np
+from typing import Dict
 
 class ContextNormalizer:
     """
@@ -39,7 +40,7 @@ class ContextNormalizer:
 
         return min(max(norm, 0.0), 1.0)
 
-    def normalize_context(self, raw_features: Dict[str, Any]) -> np.ndarray:
+    def normalize_context(self, raw_features: Dict[str, any]) -> np.ndarray:
         """将原始特征字典映射为归一化向量
 
         Args:

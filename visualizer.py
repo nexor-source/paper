@@ -42,7 +42,8 @@ class PartitionVisualizer:
         ax.set_ylabel(f"Feature {dim_y}")
 
         # 获取所有分区的期望奖励，用于归一化颜色
-        qualities = [p.estimated_quality for p in self.partitions if p.sample_count > 0]
+        qualities = [p.estimated_quality for p in self.partitions]
+        # qualities = [p.estimated_quality for p in self.partitions if p.sample_count > 0]
         if qualities:
             min_quality, max_quality = min(qualities), max(qualities)
         else:

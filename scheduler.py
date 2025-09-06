@@ -6,7 +6,7 @@ from typing import List, Dict
 from normalizer import ContextNormalizer
 from task_replicator import Assignment, TaskReplicator
 from visualizer import PartitionVisualizer
-from config import WORKER_FEATURE_VALUES_RANGE
+from config import *
 
 class Task:
     """
@@ -289,7 +289,7 @@ if __name__ == "__main__":
     scheduler = Scheduler(workers, normalizer, replicator)
 
     # 模拟任务流，多轮调度
-    for step_i in range(20):
+    for step_i in range(40):
         # 模拟每步新任务到达：任务类型 0~9 随机，数据大小 100~3000MB，deadline 1~3 秒
         new_tasks: List[Task] = []
         for _ in range(np.random.randint(2, 5)):

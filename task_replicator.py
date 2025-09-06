@@ -1,6 +1,7 @@
 import numpy as np
 from typing import List, Tuple
 from scipy.optimize import linear_sum_assignment
+from config import *
 
 class ContextSpacePartition:
     """
@@ -19,7 +20,23 @@ class ContextSpacePartition:
         self.sample_count = 0   # 该区域被采样的次数
         self.estimated_quality = 0.0  # 该区域内任务副本的平均完成质量估计
         self.children = None    # 子划分列表，未细分时为None
+
+        # 新增：层级先验（“父经验”）。注意：prior_weight 不计入细分阈值
+        self.prior_mean = 0.5                 # 缺省先验均值（对二元奖励可设 0.5）
+        self.prior_weight = 0.0               # 先验“伪样本权重”
+        self.sum_reward = 0.0                 # 该 partition 所有样本带来的reward总和
     
+    def posterior_mean(self) -> float:
+        """融合先验与真实样本的估计质量（后验均值）
+
+        Returns:
+            float: 当前分区的估计质量（先验均值与观测数据的加权平均）。
+        """
+        total_w = self.prior_weight + self.sample_count
+        if total_w <= 0:
+            return self.prior_mean  # 没有任何信息时，退回先验均值
+        return (self.prior_mean * self.prior_weight + self.sum_reward) / total_w
+
     def contains(self, context: np.ndarray) -> bool:
         """判断上下文是否在该划分区域内
 
@@ -34,14 +51,19 @@ class ContextSpacePartition:
                 abs(context[d] - self.bounds[d][1]) < EPS  # 允许等于上界
                 for d in range(len(context)))
 
-    def update_reward(self, reward: float):
+    def update_reward(self, reward: float, debug: bool = False):
         """根据观察到的副本完成奖励更新该区域的样本计数和平均质量估计
 
         Args:
             reward (float): 当前副本任务完成奖励，通常取0或1。
+            debug (bool): 用于代码内部调用，如果为true则不会增加样本数量，只是更新估计质量
         """
-        self.sample_count += 1
-        self.estimated_quality = ((self.estimated_quality * (self.sample_count - 1)) + reward) / self.sample_count
+        if not debug:
+            self.sample_count += 1
+        self.sum_reward += reward
+        # 仅作为一个“纯样本平均”的快速回显；真正用于决策请调用 posterior_mean()
+        # self.estimated_quality = self.sum_reward / self.sample_count
+        self.estimated_quality = self.posterior_mean()
     
     def subdivide(self):
         """将该划分区域沿每个维度中点二分，产生 2^d 个子区域
@@ -72,6 +94,19 @@ class ContextSpacePartition:
             new_bounds_list.append(new_bounds)
         # 创建子划分对象列表
         self.children = [ContextSpacePartition(b, self.depth + 1) for b in new_bounds_list]
+
+        # —— 关键：将父分区“后验均值”作为子分区“先验均值”，并给予弱化先验权重 ——
+        parent_post = self.posterior_mean()
+        total_prior = LAMBDA_PRIOR * min(self.sample_count, PRIOR_CAP)  # 控制强度与上限
+        per_child_prior = total_prior / (2 ** d) if total_prior > 0 else 0.0
+
+        for child in self.children:
+            child.prior_mean = parent_post
+            child.prior_weight = per_child_prior
+            child.update_reward(0, True)
+            # 重要：不继承 sample_count / sum_reward，避免“过度自信”
+            # child.sample_count = 0
+            # child.sum_reward  = 0.0
     
     def find_partition(self, context: np.ndarray):
         """递归寻找包含指定上下文的最底层划分区域（叶节点）

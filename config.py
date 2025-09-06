@@ -9,3 +9,10 @@ WORKER_FEATURE_VALUES_RANGE = {
     "data_size": (0.0, 5000.0),         # 0-5000 MB
     "weather": (0, 4)                   # 5 类天气，编码 0-4
 }
+
+# 从父分区的真实样本里“借”百分之多少给子分区。
+LAMBDA_PRIOR = 0.5  
+
+# 从父分区最多继承样本数
+PRIOR_CAP = 10
+

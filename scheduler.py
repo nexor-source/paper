@@ -172,7 +172,7 @@ class Scheduler:
         return candidates
 
     def evaluate_reward(self, context: np.ndarray) -> float:
-        """根据 context 向量计算成功概率
+        """根据 context 向量模拟得到成功概率
         
         Args:
             context (np.ndarray): 归一化上下文向量，shape=(d,)
@@ -289,7 +289,7 @@ if __name__ == "__main__":
     scheduler = Scheduler(workers, normalizer, replicator)
 
     # 模拟任务流，多轮调度
-    for step_i in range(40):
+    for step_i in range(300):
         # 模拟每步新任务到达：任务类型 0~9 随机，数据大小 100~3000MB，deadline 1~3 秒
         new_tasks: List[Task] = []
         for _ in range(np.random.randint(2, 5)):
@@ -300,11 +300,7 @@ if __name__ == "__main__":
 
         scheduler.step(new_tasks, batch_size=3)  # 每轮调度最多 3 个任务
 
-        # 展示各 partition 的样本数
-        print(f"Step {step_i}: Current Partitions and Sample Counts:")
-        for partition in replicator.partitions:
-            if partition.sample_count > 0:
-                print(f"Partition {partition.bounds}: Sample Count = {partition.sample_count}")
-
-        visualizer = PartitionVisualizer(replicator.partitions)
-        visualizer.plot_2d_partitions(dim_x=0, dim_y=1, iteration=step_i)
+        if step_i % 10 == 0:
+            print(f"--- After {step_i} steps ---")
+            visualizer = PartitionVisualizer(replicator.partitions)
+            visualizer.plot_2d_partitions(dim_x=0, dim_y=1, iteration=step_i)

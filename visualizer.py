@@ -55,12 +55,14 @@ class PartitionVisualizer:
             y_min, y_max = p.bounds[dim_y]
 
             # 根据期望奖励计算颜色
-            if p.sample_count > 0:
-                normalized_quality = p.estimated_quality
-                # normalized_quality = (p.estimated_quality - min_quality) / (max_quality - min_quality + 1e-6)
-                color = cm.viridis(normalized_quality)  # 使用 Viridis 颜色映射
-            else:
-                color = (1, 1, 1, 0)  # 空白区域为透明
+            # if p.sample_count > 0:
+            #     normalized_quality = p.estimated_quality
+            #     # normalized_quality = (p.estimated_quality - min_quality) / (max_quality - min_quality + 1e-6)
+            #     color = cm.viridis(normalized_quality)  # 使用 Viridis 颜色映射
+            # else:
+            #     color = (1, 1, 1, 0)  # 空白区域为透明
+            normalized_quality = p.estimated_quality
+            color = cm.viridis(normalized_quality)
 
             rect = patches.Rectangle(
                 (x_min, y_min),

@@ -1,6 +1,7 @@
 import numpy as np
 from collections import deque
 from typing import List, Dict
+from scipy.optimize import linear_sum_assignment
 
 # 你之前定义的 ContextNormalizer, Assignment, TaskReplicator 类这里省略，假设已经实现并导入
 from normalizer import ContextNormalizer
@@ -171,8 +172,61 @@ class Scheduler:
                 candidates.append(assignment)
         return candidates
 
+    def _oracle_select_assignments(self, candidate_assignments: List[Assignment]) -> List[Assignment]:
+        """全知全能（oracle）下基于真实成功概率的最优匹配。
+
+        使用与 TaskReplicator 相同的约束与代价形式，但将收益替换为真实的期望净收益
+        p(context) - replication_cost。
+
+        Args:
+            candidate_assignments: 候选工人-任务对
+
+        Returns:
+            List[Assignment]: 基于真实概率的最优匹配集合（仅保留净收益>0的对）。
+        """
+        if not candidate_assignments:
+            return []
+
+        # 建立任务/工人索引
+        task_ids = sorted(set(a.task_id for a in candidate_assignments))
+        worker_ids = sorted(set(a.worker_id for a in candidate_assignments))
+        task_idx = {t: i for i, t in enumerate(task_ids)}
+        worker_idx = {w: j for j, w in enumerate(worker_ids)}
+
+        # 真实期望净收益矩阵（注意：linear_sum_assignment 求最小成本，因此取负）
+        LARGE_VALUE = 1e6
+        cost_matrix = np.full((len(task_ids), len(worker_ids)), -LARGE_VALUE, dtype=float)
+        for a in candidate_assignments:
+            i = task_idx[a.task_id]
+            j = worker_idx[a.worker_id]
+            p = self.evaluate_reward(a.context)
+            net = p - self.replicator.replication_cost
+            cost_matrix[i, j] = -net
+
+        row_ind, col_ind = linear_sum_assignment(cost_matrix)
+
+        selected: List[Assignment] = []
+        for i, j in zip(row_ind, col_ind):
+            # 过滤净收益<=0的匹配
+            if -cost_matrix[i, j] <= 0:
+                continue
+            t_id = task_ids[i]
+            w_id = worker_ids[j]
+            for a in candidate_assignments:
+                if a.task_id == t_id and a.worker_id == w_id:
+                    selected.append(a)
+                    break
+        return selected
+
+    def _expected_total_reward(self, assignments: List[Assignment]) -> float:
+        """基于真实成功概率的期望总净收益: sum(p(context) - replication_cost)."""
+        if not assignments:
+            return 0.0
+        rc = self.replicator.replication_cost
+        return float(sum(self.evaluate_reward(a.context) - rc for a in assignments))
+
     def evaluate_reward(self, context: np.ndarray) -> float:
-        """根据 context 向量模拟得到成功概率
+        """根据 context 向量模拟得到【成功概率】
         
         Args:
             context (np.ndarray): 归一化上下文向量，shape=(d,)
@@ -238,6 +292,12 @@ class Scheduler:
         # 4. 调用分配算法
         selected_assignments = self.replicator.select_assignments(candidates)
 
+        # 4.1 计算基于真实概率的最优匹配（oracle）与一步 regret/loss
+        oracle_assignments = self._oracle_select_assignments(candidates)
+        alg_expected = self._expected_total_reward(selected_assignments)
+        oracle_expected = self._expected_total_reward(oracle_assignments)
+        step_loss = max(0.0, oracle_expected - alg_expected)
+
         # 5. 模拟执行和奖励（这里用随机模拟，真实场景由系统反馈）
         rewards: Dict[Assignment, float] = {}
         for a in selected_assignments:
@@ -251,7 +311,8 @@ class Scheduler:
         self.replicator.update_assignments_reward(selected_assignments, rewards)
 
         print(
-            f"Time {self.time}: Scheduled {len(selected_assignments)} assignments from {len(tasks_to_schedule)} tasks"
+            f"Time {self.time}: Scheduled {len(selected_assignments)} assignments from {len(tasks_to_schedule)} tasks | "
+            f"expected={alg_expected:.4f}, oracle={oracle_expected:.4f}, loss={step_loss:.4f}"
         )
         self.time += 1
 

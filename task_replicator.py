@@ -98,6 +98,7 @@ class ContextSpacePartition:
         # —— 关键：将父分区“后验均值”作为子分区“先验均值”，并给予弱化先验权重 ——
         parent_post = self.posterior_mean()
         total_prior = LAMBDA_PRIOR * min(self.sample_count, PRIOR_CAP)  # 控制强度与上限
+        d = len(self.bounds)
         per_child_prior = total_prior / (2 ** d) if total_prior > 0 else 0.0
 
         for child in self.children:

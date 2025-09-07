@@ -1,4 +1,5 @@
 import numpy as np
+import os
 from collections import deque
 from typing import List, Dict
 from scipy.optimize import linear_sum_assignment
@@ -8,6 +9,9 @@ from normalizer import ContextNormalizer
 from task_replicator import Assignment, TaskReplicator
 from visualizer import PartitionVisualizer
 from config import *
+
+# 全局记录每一步的 loss（oracle 与算法期望净收益之差的非负部分）
+LOSS_HISTORY: List[float] = []
 
 class Task:
     """
@@ -297,6 +301,8 @@ class Scheduler:
         alg_expected = self._expected_total_reward(selected_assignments)
         oracle_expected = self._expected_total_reward(oracle_assignments)
         step_loss = max(0.0, oracle_expected - alg_expected)
+        # 记录本步 loss 到全局列表
+        LOSS_HISTORY.append(float(step_loss))
 
         # 5. 模拟执行和奖励（这里用随机模拟，真实场景由系统反馈）
         rewards: Dict[Assignment, float] = {}
@@ -348,20 +354,49 @@ if __name__ == "__main__":
         replication_cost=0.1,
     )
     scheduler = Scheduler(workers, normalizer, replicator)
+    # 确保输出目录存在
+    os.makedirs("output", exist_ok=True)
 
     # 模拟任务流，多轮调度
     for step_i in range(300):
         # 模拟每步新任务到达：任务类型 0~9 随机，数据大小 100~3000MB，deadline 1~3 秒
         new_tasks: List[Task] = []
-        for _ in range(np.random.randint(2, 5)):
+        for _ in range(np.random.randint(6, 16)):
             task_type = np.random.randint(0, 10)
             data_size = np.random.uniform(100, 3000)
             deadline = np.random.uniform(1, 3)
             new_tasks.append(Task(-1, task_type, data_size, deadline))  # task_id 自动分配
 
-        scheduler.step(new_tasks, batch_size=3)  # 每轮调度最多 3 个任务
+        scheduler.step(new_tasks, batch_size=10)  # 每轮调度最多 5 个任务
 
         if step_i % 10 == 0:
             print(f"--- After {step_i} steps ---")
             visualizer = PartitionVisualizer(replicator.partitions)
-            visualizer.plot_2d_partitions(dim_x=0, dim_y=1, iteration=step_i)
+            # 保存分区可视化到文件，避免阻塞显示窗口
+            os.makedirs("output", exist_ok=True)
+            visualizer.plot_2d_partitions(
+                dim_x=0,
+                dim_y=1,
+                iteration=step_i,
+                save_path=f"output/partition_{step_i}.png",
+            )
+
+    # 所有步骤完成后，保存 loss 曲线到文件 output/loss.png
+    try:
+        import matplotlib.pyplot as plt
+
+        os.makedirs("output", exist_ok=True)
+        plt.figure(figsize=(8, 4))
+        plt.plot(range(len(LOSS_HISTORY)), LOSS_HISTORY, label="loss", color="tab:red")
+        plt.title("Loss over Steps")
+        plt.xlabel("Step")
+        plt.ylabel("Loss")
+
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig("output/loss.png", dpi=150)
+        plt.close()
+        print("Saved loss curve to output/loss.png")
+    except Exception as e:
+        print(f"Failed to save loss curve: {e}")

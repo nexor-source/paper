@@ -352,6 +352,7 @@ if __name__ == "__main__":
         partition_split_threshold=10,
         budget=1,
         replication_cost=0.1,
+        max_partition_depth=MAX_PARTITION_DEPTH,
     )
     scheduler = Scheduler(workers, normalizer, replicator)
     # 确保输出目录存在

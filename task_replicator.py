@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from scipy.optimize import linear_sum_assignment
 from config import *
 
@@ -151,7 +151,7 @@ class TaskReplicator:
     利用匈牙利算法实现任务-工人最大收益匹配，
     动态细分上下文划分空间保证长期学习精度。
     """
-    def __init__(self, context_dim: int, partition_split_threshold: int, budget: int, replication_cost: float):
+    def __init__(self, context_dim: int, partition_split_threshold: int, budget: int, replication_cost: float, max_partition_depth: Optional[int] = None):
         """初始化任务分配器
 
         Args:
@@ -159,10 +159,12 @@ class TaskReplicator:
             partition_split_threshold (int): 划分细分的阈值（样本数达到时细分）。
             budget (int): 每个任务允许的最大副本数。
             replication_cost (float): 每次分配的成本。
+            max_partition_depth (Optional[int], optional): 最大细分层级，防止过度细分。默认为 None（不限制）。
         """
         self.context_dim = context_dim
         self.budget = budget
         self.replication_cost = replication_cost
+        self.max_partition_depth = max_partition_depth
         
         # 初始化根划分，单位超立方体[0,1]^d
         self.root_partition = ContextSpacePartition(bounds=[(0,1)]*context_dim)
@@ -236,8 +238,11 @@ class TaskReplicator:
             p = self.root_partition.find_partition(a.context)
             reward = rewards.get(a, 0)
             p.update_reward(reward)
-            # 样本数达到阈值后进行二分细分
+            # 样本数达到阈值后进行二分细分（受最大层级限制）
             if p.sample_count >= self.partition_split_threshold:
+                # 若设置了最大层级限制，且当前层级已达到或超过上限，则不再细分
+                if self.max_partition_depth is not None and p.depth >= self.max_partition_depth:
+                    continue
                 p.subdivide()
                 if p in self.partitions:
                     self.partitions.remove(p)

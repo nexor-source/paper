@@ -1,5 +1,7 @@
 # config.py
 
+MAX_PARTITION_DEPTH = 4
+
 WORKER_FEATURE_VALUES_RANGE = {
     "driving_speed": (0.0, 40.0),       # 0-40 m/s (~0-144 km/h)
     "bandwidth": (0.0, 1000.0),         # 0-1000 Mbps
@@ -16,3 +18,6 @@ LAMBDA_PRIOR = 0.5
 # 从父分区最多继承样本数
 PRIOR_CAP = 10
 
+# 最大允许的上下文划分层级（根为0）。达到该层级后不再细分。
+# 可按需调整，若不希望限制，可在创建 TaskReplicator 时传入 None 覆盖。
+MAX_PARTITION_DEPTH = 4

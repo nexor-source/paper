@@ -222,6 +222,93 @@ class Scheduler:
                     break
         return selected
 
+    def _apply_worker_dynamics(self) -> None:
+        """模拟工人来去与能力漂移（使用全局 np.random，配合固定种子可复现）。"""
+        # 保障 next_worker_id 存在
+        if not hasattr(self, "next_worker_id"):
+            self.next_worker_id = (max((w.worker_id for w in self.workers), default=-1) + 1)
+
+        # 读取配置（若缺省则采用兜底值）
+        try:
+            dynamics = WORKER_DYNAMICS
+        except NameError:
+            dynamics = {
+                "leave_prob": 0.05,
+                "join_prob": 0.10,
+                "join_count_range": (0, 2),
+                "drift_frac": {
+                    "driving_speed": 0.03,
+                    "bandwidth": 0.05,
+                    "processor_performance": 0.02,
+                    "physical_distance": 0.05,
+                },
+                "weather_change_prob": 0.03,
+            }
+
+        leave_prob = float(dynamics.get("leave_prob", 0.05))
+        join_prob = float(dynamics.get("join_prob", 0.10))
+        join_lo, join_hi = dynamics.get("join_count_range", (0, 2))
+        drift_frac = dynamics.get("drift_frac", {})
+        weather_change_prob = float(dynamics.get("weather_change_prob", 0.03))
+
+        # 1) 工人离开（逐个伯努利），至少保留 1 个
+        keep_flags = []
+        for _w in self.workers:
+            keep_flags.append(np.random.random() >= leave_prob)
+        if any(keep_flags) is False and len(self.workers) > 0:
+            keep_flags[np.random.randint(0, len(self.workers))] = True
+        self.workers = [w for w, keep in zip(self.workers, keep_flags) if keep]
+
+        # 2) 工人新增（按概率触发，数量在区间内均匀采样）
+        n_join = 0
+        if np.random.random() < join_prob:
+            if join_hi >= join_lo and join_lo >= 0:
+                n_join = int(np.random.randint(join_lo, join_hi + 1))
+        for _ in range(n_join):
+            ds_min, ds_max = WORKER_FEATURE_VALUES_RANGE.get("driving_speed", (0.0, 40.0))
+            bw_min, bw_max = WORKER_FEATURE_VALUES_RANGE.get("bandwidth", (0.0, 1000.0))
+            pp_min, pp_max = WORKER_FEATURE_VALUES_RANGE.get("processor_performance", (1.0, 5.0))
+            pd_min, pd_max = WORKER_FEATURE_VALUES_RANGE.get("physical_distance", (0.0, 1000.0))
+            weather_max = int(WORKER_FEATURE_VALUES_RANGE.get("weather", (0, 4))[1])
+
+            new_w = Worker(
+                self.next_worker_id,
+                float(np.random.uniform(ds_min, ds_max)),
+                float(np.random.uniform(bw_min, bw_max)),
+                float(np.random.uniform(pp_min, pp_max)),
+                float(np.random.uniform(pd_min, pd_max)),
+                int(np.random.randint(0, weather_max + 1)),
+            )
+            self.workers.append(new_w)
+            self.next_worker_id += 1
+
+        # 3) 属性缓慢漂移（高斯噪声按范围比例），裁剪到范围内
+        def clip(v: float, lo: float, hi: float) -> float:
+            return float(min(max(v, lo), hi))
+
+        ranges = WORKER_FEATURE_VALUES_RANGE
+        for w in self.workers:
+            if "driving_speed" in drift_frac and "driving_speed" in ranges:
+                lo, hi = ranges["driving_speed"]
+                std = float(drift_frac["driving_speed"]) * (hi - lo)
+                w.driving_speed = clip(w.driving_speed + float(np.random.normal(0.0, std)), lo, hi)
+            if "bandwidth" in drift_frac and "bandwidth" in ranges:
+                lo, hi = ranges["bandwidth"]
+                std = float(drift_frac["bandwidth"]) * (hi - lo)
+                w.bandwidth = clip(w.bandwidth + float(np.random.normal(0.0, std)), lo, hi)
+            if "processor_performance" in drift_frac and "processor_performance" in ranges:
+                lo, hi = ranges["processor_performance"]
+                std = float(drift_frac["processor_performance"]) * (hi - lo)
+                w.processor_perf = clip(w.processor_perf + float(np.random.normal(0.0, std)), lo, hi)
+            if "physical_distance" in drift_frac and "physical_distance" in ranges:
+                lo, hi = ranges["physical_distance"]
+                std = float(drift_frac["physical_distance"]) * (hi - lo)
+                w.physical_distance = clip(w.physical_distance + float(np.random.normal(0.0, std)), lo, hi)
+            # weather：小概率变化为任意类别
+            if np.random.random() < weather_change_prob:
+                max_w = int(ranges.get("weather", (0, 4))[1])
+                w.weather = int(np.random.randint(0, max_w + 1))
+
     def _expected_total_reward(self, assignments: List[Assignment]) -> float:
         """基于真实成功概率的期望总净收益: sum(p(context) - replication_cost)."""
         if not assignments:
@@ -346,6 +433,11 @@ class Scheduler:
             self.time += 1
             return
 
+        # 2.5 工人动态（离开/新增/属性漂移）
+        self._apply_worker_dynamics()
+        candidates = self.generate_candidate_assignments(tasks_to_schedule)
+        # 3. 生成所有候选工人-任务对
+        candidates = self.generate_candidate_assignments(tasks_to_schedule)
         # 3. 生成所有候选工人-任务对
         candidates = self.generate_candidate_assignments(tasks_to_schedule)
 
@@ -381,6 +473,8 @@ class Scheduler:
 
 # 示例运行
 if __name__ == "__main__":
+    # 固定随机种子，保证模拟可复现
+    np.random.seed(RANDOM_SEED)
     # 初始化工人资源
     workers = [
         Worker(0, 25, 800, 3.0, 250, 1),

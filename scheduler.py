@@ -203,7 +203,7 @@ class Scheduler:
         for a in candidate_assignments:
             i = task_idx[a.task_id]
             j = worker_idx[a.worker_id]
-            p = self.evaluate_reward(a.context)
+            p = self.evaluate_reward2(a.context)
             net = p - self.replicator.replication_cost
             cost_matrix[i, j] = -net
 
@@ -227,7 +227,7 @@ class Scheduler:
         if not assignments:
             return 0.0
         rc = self.replicator.replication_cost
-        return float(sum(self.evaluate_reward(a.context) - rc for a in assignments))
+        return float(sum(self.evaluate_reward2(a.context) - rc for a in assignments))
 
     def evaluate_reward(self, context: np.ndarray) -> float:
         """根据 context 向量模拟得到【成功概率】
@@ -264,6 +264,62 @@ class Scheduler:
         p = 1 / (1 + np.exp(-score * 5))  # 乘系数调整斜率
         return float(np.clip(p, 0.01, 0.99))  # 保证不为0或1
 
+
+    def evaluate_reward2(self, context: np.ndarray) -> float:
+        """根据 context 向量模拟得到【成功概率】，但是更复杂且连续的函数
+
+        Args:
+            context (np.ndarray): 归一化上下文向量，shape=(d,)
+        Returns:
+            float: 成功概率 p ∈ [0,1]
+        Notes:
+            设计细节：
+            特征将分为正向和负向两类，正向特征考虑平方根的边际效用递减，
+            负向特征考虑凸函数 (^1.5) 的惩罚，同时正向特征之间考虑交互作用（几何平均）。
+            最终通过平滑门控（sigmoid）反映短板效应。
+
+        """
+        # Extract features (normalized to [0,1]); missing dims treated as 0
+        driving_speed = float(context[0]) if len(context) > 0 else 0.0
+        bandwidth = float(context[1]) if len(context) > 1 else 0.0
+        processor_perf = float(context[2]) if len(context) > 2 else 0.0
+        distance = float(context[3]) if len(context) > 3 else 0.0
+        # task_type = float(context[4]) if len(context) > 4 else 0.0
+        data_size = float(context[5]) if len(context) > 5 else 0.0
+        weather = float(context[6]) if len(context) > 6 else 0.0
+
+        eps = 1e-6
+
+        # Positive part: diminishing returns + interactions
+        pos_basic = (
+            0.35 * np.sqrt(driving_speed + eps)
+            + 0.35 * np.sqrt(bandwidth + eps)
+            + 0.20 * np.sqrt(processor_perf + eps)
+        )
+        pos_synergy = (
+            0.18 * np.sqrt((driving_speed * bandwidth) + eps)
+            + 0.10 * np.sqrt((bandwidth * processor_perf) + eps)
+        )
+
+        # Negative part: convex penalties
+        neg = (
+            0.25 * (distance ** 1.5)
+            + 0.20 * (data_size ** 1.2)
+            + 0.10 * (weather ** 1.2)
+        )
+
+        # Smooth gating (soft-AND). Do not gate on missing dims.
+        def gate_for(x: float, thr: float = 0.2, k: float = 6.0) -> float:
+            return 1.0 / (1.0 + np.exp(-k * (x - thr)))
+
+        gates = [gate_for(driving_speed), gate_for(bandwidth)]
+        if len(context) > 2:
+            gates.append(gate_for(processor_perf))
+        gate = float(np.prod(gates)) if gates else 1.0
+
+        raw = (pos_basic + pos_synergy) * gate - neg
+        p = 1.0 / (1.0 + np.exp(-3.0 * raw))
+        return float(np.clip(p, 0.01, 0.99))
 
     def step(self, new_tasks: List[Task], batch_size: int) -> None:
         """执行一次调度时间步：入队新任务、批量选择、匹配与反馈更新
@@ -309,7 +365,7 @@ class Scheduler:
         for a in selected_assignments:
             # 自定义线性成功率
             print(a.context)
-            p = self.evaluate_reward(a.context)
+            p = self.evaluate_reward2(a.context)
             # 模拟成功与否
             rewards[a] = np.random.binomial(1, p)
 

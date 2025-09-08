@@ -80,17 +80,48 @@ class ContextSpacePartition:
         # 计算每个维度的中点
         midpoints = [(b[0] + b[1]) / 2 for b in self.bounds]
         new_bounds_list = []
+
+        # 选择要细分的维度（基于配置），默认沿所有维度细分
+        try:
+            strategy = PARTITION_SPLIT_STRATEGY
+        except NameError:
+            strategy = 'all'
+        widths = [b[1] - b[0] for b in self.bounds]
+        if strategy == 'all':
+            dims_to_split = list(range(len(self.bounds)))
+        elif strategy == 'longest':
+            if len(self.bounds) == 0:
+                return
+            dims_to_split = [int(np.argmax(widths))]
+        elif strategy == 'topk':
+            try:
+                k = int(PARTITION_SPLIT_TOP_K)
+            except Exception:
+                k = 1
+            k = max(0, min(k, len(self.bounds)))
+            if k == 0:
+                return
+            dims_sorted = list(np.argsort(widths))[::-1]
+            dims_to_split = [int(x) for x in dims_sorted[:k]]
+        else:
+            dims_to_split = list(range(len(self.bounds)))
+        k = len(dims_to_split)
+        if k == 0:
+            return
         
         # 遍历生成2^d个子划分的边界
-        for i in range(2 ** len(self.bounds)):
+        for i in range(2 ** k):
             new_bounds = []
             # 每个新生成的划分的每个维度
             for d in range(len(self.bounds)):
-                # 根据二进制位选择下界或上界（巧妙）
-                if (i >> d) & 1 == 0:
-                    new_bounds.append((self.bounds[d][0], midpoints[d]))
+                if d in dims_to_split:
+                    bit_index = dims_to_split.index(d)
+                    if ((i >> bit_index) & 1) == 0:
+                        new_bounds.append((self.bounds[d][0], midpoints[d]))
+                    else:
+                        new_bounds.append((midpoints[d], self.bounds[d][1]))
                 else:
-                    new_bounds.append((midpoints[d], self.bounds[d][1]))
+                    new_bounds.append(self.bounds[d])
             new_bounds_list.append(new_bounds)
         # 创建子划分对象列表
         self.children = [ContextSpacePartition(b, self.depth + 1) for b in new_bounds_list]
@@ -98,8 +129,8 @@ class ContextSpacePartition:
         # —— 关键：将父分区“后验均值”作为子分区“先验均值”，并给予弱化先验权重 ——
         parent_post = self.posterior_mean()
         total_prior = LAMBDA_PRIOR * min(self.sample_count, PRIOR_CAP)  # 控制强度与上限
-        d = len(self.bounds)
-        per_child_prior = total_prior / (2 ** d) if total_prior > 0 else 0.0
+        n_child = max(1, len(self.children))
+        per_child_prior = total_prior / n_child if total_prior > 0 else 0.0
 
         for child in self.children:
             child.prior_mean = parent_post

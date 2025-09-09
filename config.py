@@ -24,7 +24,7 @@ RANDOM_SEED = 42
 WORKER_DYNAMICS = {
     "leave_prob": 0.025,
     "join_prob": 0.10,
-    "join_count_range": (0, 2),
+    "join_count_range": (0, 3),
     "drift_frac": {
         "driving_speed": 0.03,
         "bandwidth": 0.05,
@@ -51,4 +51,13 @@ MAX_PARTITION_DEPTH = 8
 PARTITION_SPLIT_STRATEGY = 'longest'
 PARTITION_SPLIT_TOP_K = 1
 
+# Baseline/Comparison experiment settings
+RUN_COMPARISON = True
+COMPARISON_STEPS = 300
+COMPARISON_BATCH_SIZE = 10
+ARRIVALS_PER_STEP = (6, 16)  # inclusive min,max
+ENABLE_WORKER_DYNAMICS_COMPARISON = True  # 由于所有baseline采用了相同的randomseed，所以随机结果是相同的
 
+# 目前算法缺少baseline, 可以加入一些baseline算法进行对比
+# 考虑的baseline算法有: Random(随机分配task到worker), Greedy等
+# 然后加入原本算法和baseline算法在loss和累计reward上的折线对比图

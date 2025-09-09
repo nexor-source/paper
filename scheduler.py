@@ -1,7 +1,7 @@
 import numpy as np
 import os
 from collections import deque
-from typing import List, Dict
+from typing import List, Dict, Callable, Tuple
 from scipy.optimize import linear_sum_assignment
 
 # 你之前定义的 ContextNormalizer, Assignment, TaskReplicator 类这里省略，假设已经实现并导入
@@ -118,7 +118,6 @@ class TaskQueue:
             tasks.append(self.queue.popleft())
         return tasks
 
-
 class Scheduler:
     """
     任务调度器，管理任务流、工人资源与调用分配算法。
@@ -129,6 +128,7 @@ class Scheduler:
         workers: List[Worker],
         context_normalizer: ContextNormalizer,
         replicator: TaskReplicator,
+        enable_worker_dynamics: bool = True,
     ):
         """初始化调度器
 
@@ -143,6 +143,7 @@ class Scheduler:
         self.workers = workers
         self.normalizer = context_normalizer
         self.replicator = replicator
+        self.enable_worker_dynamics = enable_worker_dynamics
         self.task_queue = TaskQueue()
         self.time = 0  # 模拟时间步
 
@@ -469,6 +470,250 @@ class Scheduler:
             f"expected={alg_expected:.4f}, oracle={oracle_expected:.4f}, loss={step_loss:.4f}"
         )
         self.time += 1
+
+    def step_with_selector(
+        self,
+        new_tasks: List[Task],
+        batch_size: int,
+        selector: Callable[[List[Assignment], Callable[[Assignment], float]], List[Assignment]],
+        update_model: bool = False,
+    ) -> Dict[str, float]:
+        """通用一步：自定义 selector 进行分配，可选更新模型，返回指标。"""
+        # 1. 新任务入队
+        for task in new_tasks:
+            self.task_queue.add_task(task.task_type, task.data_size, task.deadline)
+
+        # 2. 取批任务准备调度
+        tasks_to_schedule = self.task_queue.get_tasks_batch(batch_size)
+        if not tasks_to_schedule:
+            self.time += 1
+            return {"loss": 0.0, "expected": 0.0, "oracle": 0.0, "realized_net": 0.0}
+
+        # 2.5 工人动态（可开关）
+        if getattr(self, "enable_worker_dynamics", True):
+            self._apply_worker_dynamics()
+
+        # 3. 候选
+        candidates = self.generate_candidate_assignments(tasks_to_schedule)
+
+        rc = float(self.replicator.replication_cost)
+
+        def eval_net(a: Assignment) -> float:
+            return float(self.evaluate_reward2(a.context) - rc)
+
+        # 4. 选择
+        selected_assignments = selector(candidates, eval_net)
+
+        # 4.1 Oracle 与 loss
+        oracle_assignments = self._oracle_select_assignments(candidates)
+        alg_expected = self._expected_total_reward(selected_assignments)
+        oracle_expected = self._expected_total_reward(oracle_assignments)
+        step_loss = max(0.0, oracle_expected - alg_expected)
+
+        # 5. 模拟执行与奖励
+        realized_net = 0.0
+        rewards: Dict[Assignment, float] = {}
+        for a in selected_assignments:
+            p = self.evaluate_reward2(a.context)
+            r = float(np.random.binomial(1, p))
+            rewards[a] = r
+            realized_net += (r - rc)
+
+        # 6. 可选模型更新
+        if update_model and selected_assignments:
+            self.replicator.update_assignments_reward(selected_assignments, rewards)
+
+        self.time += 1
+        return {
+            "loss": float(step_loss),
+            "expected": float(alg_expected),
+            "oracle": float(oracle_expected),
+            "realized_net": float(realized_net),
+        }
+
+def _clone_workers(workers: List["Worker"]) -> List["Worker"]:
+    return [
+        Worker(
+            w.worker_id,
+            w.driving_speed,
+            w.bandwidth,
+            w.processor_perf,
+            w.physical_distance,
+            w.weather,
+        )
+        for w in workers
+    ]
+
+
+# 若启用对比实验，则优先运行并提前退出，避免执行下方旧版主流程
+if __name__ == "__main__" and bool(globals().get("RUN_COMPARISON", False)):
+    np.random.seed(RANDOM_SEED)
+    os.makedirs("output", exist_ok=True)
+
+    # 基础工人集
+    base_workers: List[Worker] = [
+        # 固定的三个样例工人
+        # id, speed, bw, cpu, distance, weather
+        Worker(0, 25, 800, 3.0, 250, 1),
+        Worker(1, 40, 400, 3.5, 300, 2),
+        Worker(2, 5, 150, 2.5, 100, 0),
+    ]
+    for i in range(3, 10):
+        base_workers.append(
+            Worker(
+                i,
+                float(np.random.uniform(0, WORKER_FEATURE_VALUES_RANGE["driving_speed"][1])),
+                float(np.random.uniform(0, WORKER_FEATURE_VALUES_RANGE["bandwidth"][1])),
+                float(np.random.uniform(2, WORKER_FEATURE_VALUES_RANGE["processor_performance"][1])),
+                float(np.random.uniform(100, WORKER_FEATURE_VALUES_RANGE["data_size"][1])),
+                int(np.random.randint(0, WORKER_FEATURE_VALUES_RANGE["task_type"][1] + 1)),
+            )
+        )
+
+    normalizer = ContextNormalizer()
+
+    steps = int(globals().get("COMPARISON_STEPS", 300))
+    batch_size = int(globals().get("COMPARISON_BATCH_SIZE", 10))
+    arrivals_min, arrivals_max = globals().get("ARRIVALS_PER_STEP", (6, 16))
+
+    # 预生成任务流，三种算法共享
+    task_stream: List[List[Task]] = []
+    for _ in range(steps):
+        new_tasks: List[Task] = []
+        n_new = int(np.random.randint(arrivals_min, arrivals_max))
+        for _k in range(n_new):
+            task_type = int(np.random.randint(0, 10))
+            data_size = float(np.random.uniform(100, 3000))
+            deadline = float(np.random.uniform(1, 3))
+            new_tasks.append(Task(-1, task_type, data_size, deadline))
+        task_stream.append(new_tasks)
+
+    from baselines import RandomBaseline
+    import matplotlib.pyplot as plt
+
+    def run_original() -> Tuple[List[float], List[float]]:
+        workers = _clone_workers(base_workers)
+        replicator = TaskReplicator(
+            context_dim=2,
+            partition_split_threshold=10,
+            budget=1,
+            replication_cost=0.1,
+            max_partition_depth=MAX_PARTITION_DEPTH,
+        )
+        scheduler = Scheduler(
+            workers,
+            normalizer,
+            replicator,
+            enable_worker_dynamics=bool(globals().get("ENABLE_WORKER_DYNAMICS_COMPARISON", False)),
+        )
+        loss_c, cum_c = [], []
+        cum = 0.0
+        np.random.seed(RANDOM_SEED)
+        for s in range(steps):
+            res = scheduler.step_with_selector(
+                task_stream[s],
+                batch_size,
+                lambda cands, _e: scheduler.replicator.select_assignments(cands),
+                update_model=True,
+            )
+            loss_c.append(res["loss"])
+            cum += res["realized_net"]
+            cum_c.append(cum)
+        return loss_c, cum_c
+
+    def run_with_selector(sel) -> Tuple[List[float], List[float]]:
+        workers = _clone_workers(base_workers)
+        replicator = TaskReplicator(
+            context_dim=2,
+            partition_split_threshold=10,
+            budget=1,
+            replication_cost=0.1,
+            max_partition_depth=MAX_PARTITION_DEPTH,
+        )
+        scheduler = Scheduler(
+            workers,
+            normalizer,
+            replicator,
+            enable_worker_dynamics=bool(globals().get("ENABLE_WORKER_DYNAMICS_COMPARISON", False)),
+        )
+        loss_c, cum_c = [], []
+        cum = 0.0
+        np.random.seed(RANDOM_SEED)
+        for s in range(steps):
+            res = scheduler.step_with_selector(task_stream[s], batch_size, sel, update_model=False)
+            loss_c.append(res["loss"])
+            cum += res["realized_net"]
+            cum_c.append(cum)
+        return loss_c, cum_c
+
+    # Baselines
+    rand_selector = RandomBaseline()
+    rand_fn = lambda c, e: rand_selector.select(c, e)
+
+    # Oracle policy (for cumulative reward plot)
+    def run_oracle() -> Tuple[List[float], List[float]]:
+        workers = _clone_workers(base_workers)
+        replicator = TaskReplicator(
+            context_dim=2,
+            partition_split_threshold=10,
+            budget=1,
+            replication_cost=0.1,
+            max_partition_depth=MAX_PARTITION_DEPTH,
+        )
+        scheduler = Scheduler(
+            workers,
+            normalizer,
+            replicator,
+            enable_worker_dynamics=bool(globals().get("ENABLE_WORKER_DYNAMICS_COMPARISON", False)),
+        )
+        loss_c, cum_c = [], []
+        cum = 0.0
+        np.random.seed(RANDOM_SEED)
+        for s in range(steps):
+            res = scheduler.step_with_selector(
+                task_stream[s],
+                batch_size,
+                lambda cands, _e: scheduler._oracle_select_assignments(cands),
+                update_model=False,
+            )
+            loss_c.append(res["loss"])  # should be ~0 for oracle
+            cum += res["realized_net"]
+            cum_c.append(cum)
+        return loss_c, cum_c
+
+    loss_o, cum_o = run_original()
+    loss_r, cum_r = run_with_selector(rand_fn)
+    loss_orc, cum_orc = run_oracle()
+
+    plt.figure(figsize=(9, 4))
+    plt.plot(loss_o, label="Original")
+    plt.plot(loss_r, label="Random")
+    plt.title("Loss Comparison")
+    plt.xlabel("Step")
+    plt.ylabel("Loss")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("output/compare_loss.png", dpi=150)
+    plt.close()
+
+    plt.figure(figsize=(9, 4))
+    plt.plot(cum_o, label="Original")
+    plt.plot(cum_r, label="Random")
+    plt.plot(cum_orc, label="Oracle")
+    plt.title("Cumulative Net Reward")
+    plt.xlabel("Step")
+    plt.ylabel("Cumulative Reward (sum(reward - cost))")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("output/compare_cum_reward.png", dpi=150)
+    plt.close()
+    print("Saved loss (Original/Random) and cumulative reward (Original/Random/Oracle) plots.")
+
+    import sys as _sys
+    _sys.exit(0)
+
 
 
 # 示例运行

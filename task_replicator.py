@@ -231,11 +231,13 @@ class TaskReplicator:
             i = task_idx[a.task_id]
             j = worker_idx[a.worker_id]
             p = partition_map[a]
-            # 未被探索的划分赋极大估计质量，保证算法探索
-            if p.sample_count == 0:
-                estimated_quality = LARGE_VALUE
-            else:
-                estimated_quality = p.estimated_quality
+            #  # 未被探索的划分赋极大估计质量，保证算法探索
+            # if p.sample_count == 0:
+            #     estimated_quality = LARGE_VALUE
+            # else:
+            #     estimated_quality = p.estimated_quality
+            # 极大探索权重有点过，改为使用后验均值
+            estimated_quality = p.posterior_mean()
             net_quality = estimated_quality - self.replication_cost
             cost_matrix[i, j] = -net_quality  # 转为成本矩阵，匈牙利算法求最小值
         

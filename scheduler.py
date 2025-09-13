@@ -163,14 +163,15 @@ class Scheduler:
         candidates: List[Assignment] = []
         for task in tasks:
             for worker in self.workers:
+                # Keep order aligned with evaluate_reward2 indices
                 raw_context = {
-                    "driving_speed": worker.driving_speed,
-                    "bandwidth": worker.bandwidth,
-                    # "processor_performance": worker.processor_perf,
-                    # "physical_distance": worker.physical_distance,
-                    # "task_type": task.task_type,
-                    # "data_size": task.data_size,
-                    # "weather": worker.weather,
+                    "driving_speed": float(worker.driving_speed),
+                    "bandwidth": float(worker.bandwidth),
+                    "processor_performance": float(worker.processor_perf),
+                    "physical_distance": float(worker.physical_distance),
+                    "task_type": int(task.task_type),
+                    "data_size": float(task.data_size),
+                    "weather": int(worker.weather),
                 }
                 norm_context = self.normalizer.normalize_context(raw_context)
                 assignment = Assignment(worker.worker_id, task.task_id, norm_context)
@@ -529,6 +530,8 @@ class Scheduler:
             "expected": float(alg_expected),
             "oracle": float(oracle_expected),
             "realized_net": float(realized_net),
+            "sel_workers": sorted({int(a.worker_id) for a in selected_assignments}),
+            "sel_tasks": sorted({int(a.task_id) for a in selected_assignments}),
         }
 
 def _clone_workers(workers: List["Worker"]) -> List["Worker"]:
@@ -564,9 +567,9 @@ if __name__ == "__main__" and bool(globals().get("RUN_COMPARISON", False)):
                 i,
                 float(np.random.uniform(0, WORKER_FEATURE_VALUES_RANGE["driving_speed"][1])),
                 float(np.random.uniform(0, WORKER_FEATURE_VALUES_RANGE["bandwidth"][1])),
-                float(np.random.uniform(2, WORKER_FEATURE_VALUES_RANGE["processor_performance"][1])),
-                float(np.random.uniform(100, WORKER_FEATURE_VALUES_RANGE["data_size"][1])),
-                int(np.random.randint(0, WORKER_FEATURE_VALUES_RANGE["task_type"][1] + 1)),
+                float(np.random.uniform(WORKER_FEATURE_VALUES_RANGE["processor_performance"][0], WORKER_FEATURE_VALUES_RANGE["processor_performance"][1])),
+                float(np.random.uniform(0, WORKER_FEATURE_VALUES_RANGE["physical_distance"][1])),
+                int(np.random.randint(0, WORKER_FEATURE_VALUES_RANGE["weather"][1] + 1)),
             )
         )
 
@@ -588,13 +591,13 @@ if __name__ == "__main__" and bool(globals().get("RUN_COMPARISON", False)):
             new_tasks.append(Task(-1, task_type, data_size, deadline))
         task_stream.append(new_tasks)
 
-    from baselines import RandomBaseline
+    from baselines import RandomBaseline, GreedyBaseline
     import matplotlib.pyplot as plt
 
     def run_original() -> Tuple[List[float], List[float]]:
         workers = _clone_workers(base_workers)
         replicator = TaskReplicator(
-            context_dim=2,
+            context_dim=7,
             partition_split_threshold=10,
             budget=1,
             replication_cost=0.1,
@@ -624,7 +627,7 @@ if __name__ == "__main__" and bool(globals().get("RUN_COMPARISON", False)):
     def run_with_selector(sel) -> Tuple[List[float], List[float]]:
         workers = _clone_workers(base_workers)
         replicator = TaskReplicator(
-            context_dim=2,
+            context_dim=7,
             partition_split_threshold=10,
             budget=1,
             replication_cost=0.1,
@@ -649,12 +652,14 @@ if __name__ == "__main__" and bool(globals().get("RUN_COMPARISON", False)):
     # Baselines
     rand_selector = RandomBaseline()
     rand_fn = lambda c, e: rand_selector.select(c, e)
+    greedy_selector = GreedyBaseline()
+    greedy_fn = lambda c, e: greedy_selector.select(c, e)
 
     # Oracle policy (for cumulative reward plot)
     def run_oracle() -> Tuple[List[float], List[float]]:
         workers = _clone_workers(base_workers)
         replicator = TaskReplicator(
-            context_dim=2,
+            context_dim=7,
             partition_split_threshold=10,
             budget=1,
             replication_cost=0.1,
@@ -683,11 +688,13 @@ if __name__ == "__main__" and bool(globals().get("RUN_COMPARISON", False)):
 
     loss_o, cum_o = run_original()
     loss_r, cum_r = run_with_selector(rand_fn)
+    loss_g, cum_g = run_with_selector(greedy_fn)
     loss_orc, cum_orc = run_oracle()
 
     plt.figure(figsize=(9, 4))
     plt.plot(loss_o, label="Original")
     plt.plot(loss_r, label="Random")
+    plt.plot(loss_g, label="Greedy")
     plt.title("Loss Comparison")
     plt.xlabel("Step")
     plt.ylabel("Loss")
@@ -700,6 +707,7 @@ if __name__ == "__main__" and bool(globals().get("RUN_COMPARISON", False)):
     plt.figure(figsize=(9, 4))
     plt.plot(cum_o, label="Original")
     plt.plot(cum_r, label="Random")
+    plt.plot(cum_g, label="Greedy")
     plt.plot(cum_orc, label="Oracle")
     plt.title("Cumulative Net Reward")
     plt.xlabel("Step")

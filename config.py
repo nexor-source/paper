@@ -3,12 +3,12 @@
 MAX_PARTITION_DEPTH = 4
 
 WORKER_FEATURE_VALUES_RANGE = {
-    "driving_speed": (0.0, 40.0),       # 0-40 m/s (~0-144 km/h)
-    "bandwidth": (0.0, 1000.0),         # 0-1000 Mbps
-    "processor_performance": (1.0, 5.0),# 1-5 GHz
-    "physical_distance": (0.0, 1000.0), # 0-1000 m
-    "task_type": (0, 9),                # 10 种任务，编码 0-9
-    "data_size": (0.0, 5000.0),         # 0-5000 MB
+    "driving_speed": (0.0, 40.0),       # 0-40 m/s (~0-144 km/h) 车辆行驶速度
+    "bandwidth": (0.0, 1000.0),         # 0-1000 Mbps 当前可用带宽
+    "processor_performance": (1.0, 5.0),# 1-5 GHz 计算能力
+    "physical_distance": (0.0, 1000.0), # 0-1000 m 到附近基站的平均距离
+    "task_type": (0, 9),                # 10 任务类型
+    "data_size": (0.0, 5000.0),         # 0-5000 MB 任务数据量
     "weather": (0, 4)                   # 5 类天气，编码 0-4？必须做到天气越大越恶劣
 }
 
@@ -28,10 +28,10 @@ WORKER_DYNAMICS = {
     "drift_frac": {
         "driving_speed": 0.03,
         "bandwidth": 0.05,
-        # "processor_performance": 0.02,
-        # "physical_distance": 0.05,
+        "processor_performance": 0.02,
+        "physical_distance": 0.05,
     },
-    # "weather_change_prob": 0.03,
+    "weather_change_prob": 0.03,
 }
 
 # 从父分区的真实样本里“借”百分之多少给子分区。
@@ -58,6 +58,8 @@ COMPARISON_BATCH_SIZE = 10
 ARRIVALS_PER_STEP = (6, 16)  # inclusive min,max
 ENABLE_WORKER_DYNAMICS_COMPARISON = True  # 由于所有baseline采用了相同的randomseed，所以随机结果是相同的
 
-# 目前算法缺少baseline, 可以加入一些baseline算法进行对比
-# 考虑的baseline算法有: Random(随机分配task到worker), Greedy等
-# 然后加入原本算法和baseline算法在loss和累计reward上的折线对比图
+# 算法模拟worker的特征的时候混入了task的特征
+
+# 注释统一度量
+
+# 

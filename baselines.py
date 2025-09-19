@@ -41,7 +41,7 @@ class RandomBaseline:
 class GreedyBaseline:
     """
     Greedy by true expected net reward: sort all candidate pairs by
-    evaluate_reward2(context) - cost and pick non-conflicting pairs.
+    evaluate_reward_complex(context) - cost and pick non-conflicting pairs.
     """
 
     def select(self, candidates: List[Assignment], eval_net: Callable[[Assignment], float]) -> List[Assignment]:
@@ -61,3 +61,4 @@ class GreedyBaseline:
             used_tasks.add(a.task_id)
             used_workers.add(a.worker_id)
         return selected
+

@@ -163,7 +163,7 @@ class Scheduler:
         candidates: List[Assignment] = []
         for task in tasks:
             for worker in self.workers:
-                # Keep order aligned with evaluate_reward2 indices
+                # Keep order aligned with evaluate_reward_complex indices
                 raw_context = {
                     "driving_speed": float(worker.driving_speed),
                     "bandwidth": float(worker.bandwidth),
@@ -202,7 +202,7 @@ class Scheduler:
 
         for a in candidate_assignments:
             i, j = t_idx[a.task_id], w_idx[a.worker_id]
-            p = self.evaluate_reward2(a.context)
+            p = self.evaluate_reward_complex(a.context)
             net = float(p - self.replicator.replication_cost)
             profits[i, j] = net
             pair2a[(a.task_id, a.worker_id)] = a
@@ -321,9 +321,9 @@ class Scheduler:
         if not assignments:
             return 0.0
         rc = self.replicator.replication_cost
-        return float(sum(self.evaluate_reward2(a.context) - rc for a in assignments))
+        return float(sum(self.evaluate_reward_complex(a.context) - rc for a in assignments))
 
-    def evaluate_reward(self, context: np.ndarray) -> float:
+    def evaluate_reward_simple(self, context: np.ndarray) -> float:
         """根据 context 向量模拟得到【成功概率】
         
         Args:
@@ -359,7 +359,7 @@ class Scheduler:
         return float(np.clip(p, 0.01, 0.99))  # 保证不为0或1
 
 
-    def evaluate_reward2(self, context: np.ndarray) -> float:
+    def evaluate_reward_complex(self, context: np.ndarray) -> float:
         """根据 context 向量模拟得到【成功概率】，但是更复杂且连续的函数
 
         Args:
@@ -463,7 +463,7 @@ class Scheduler:
         for a in selected_assignments:
             # 自定义线性成功率
             print(a.context)
-            p = self.evaluate_reward2(a.context)
+            p = self.evaluate_reward_complex(a.context)
             # 模拟成功与否
             rewards[a] = np.random.binomial(1, p)
 
@@ -503,7 +503,7 @@ class Scheduler:
         candidates = self.generate_candidate_assignments(tasks_to_schedule)
 
         rc = float(self.replicator.replication_cost)
-        reward_fn = eval_net_fn if eval_net_fn is not None else self.evaluate_reward2
+        reward_fn = eval_net_fn if eval_net_fn is not None else self.evaluate_reward_complex
 
         def eval_net(a: Assignment) -> float:
             return float(reward_fn(a.context) - rc)
@@ -521,7 +521,7 @@ class Scheduler:
         realized_net = 0.0
         rewards: Dict[Assignment, float] = {}
         for a in selected_assignments:
-            p = self.evaluate_reward2(a.context)
+            p = self.evaluate_reward_complex(a.context)
             r = float(np.random.binomial(1, p))
             rewards[a] = r
             realized_net += (r - rc)
@@ -684,7 +684,7 @@ def run_experiment() -> None:
                 batch_size,
                 sel,
                 update_model=False,
-                eval_net_fn=scheduler.evaluate_reward2,
+                eval_net_fn=scheduler.evaluate_reward_complex,
             )
             loss_c.append(res["loss"])
             cum += res["realized_net"]

@@ -1,7 +1,7 @@
 import numpy as np
 import os
 from collections import deque
-from typing import List, Dict, Callable, Tuple, Optional
+from typing import List, Dict, Callable, Tuple
 from scipy.optimize import linear_sum_assignment
 
 # 你之前定义的 ContextNormalizer, Assignment, TaskReplicator 类这里省略，假设已经实现并导入
@@ -442,7 +442,9 @@ class Scheduler:
 
         # 2.5 工人动态（离开/新增/属性漂移）
         self._apply_worker_dynamics()
-
+        candidates = self.generate_candidate_assignments(tasks_to_schedule)
+        # 3. 生成所有候选工人-任务对
+        candidates = self.generate_candidate_assignments(tasks_to_schedule)
         # 3. 生成所有候选工人-任务对
         candidates = self.generate_candidate_assignments(tasks_to_schedule)
 
@@ -482,7 +484,6 @@ class Scheduler:
         batch_size: int,
         selector: Callable[[List[Assignment], Callable[[Assignment], float]], List[Assignment]],
         update_model: bool = False,
-        eval_net_fn: Optional[Callable[[np.ndarray], float]] = None,
     ) -> Dict[str, float]:
         """通用一步：自定义 selector 进行分配，可选更新模型，返回指标。"""
         # 1. 新任务入队
@@ -503,10 +504,9 @@ class Scheduler:
         candidates = self.generate_candidate_assignments(tasks_to_schedule)
 
         rc = float(self.replicator.replication_cost)
-        reward_fn = eval_net_fn if eval_net_fn is not None else self.evaluate_reward2
 
         def eval_net(a: Assignment) -> float:
-            return float(reward_fn(a.context) - rc)
+            return float(self.evaluate_reward2(a.context) - rc)
 
         # 4. 选择
         selected_assignments = selector(candidates, eval_net)
@@ -556,19 +556,6 @@ def _clone_workers(workers: List["Worker"]) -> List["Worker"]:
 
 # 若启用对比实验，则优先运行并提前退出，避免执行下方旧版主流程
 def run_experiment() -> None:
-    """统一的主实验入口。
-
-    - 初始化随机种子与输出目录；
-    - 构建基础工人集与 ContextNormalizer；
-    - 预生成共享任务流（Original/Random/Greedy/Oracle 共用，同一分布、同一顺序）；
-    - 分别运行 Original、Random、Greedy、Oracle 四种策略并对比：
-      Original 在循环内每 10 步输出一次上下文划分可视化 `output/partition_{step}.png`；
-    - 最后保存对比图到 `output/compare_loss.png` 与 `output/compare_cum_reward.png`。
-
-    相关配置见 config.py：RANDOM_SEED、COMPARISON_STEPS、COMPARISON_BATCH_SIZE、
-    ARRIVALS_PER_STEP、ENABLE_WORKER_DYNAMICS_COMPARISON、MAX_PARTITION_DEPTH。
-    """
-    # 固定随机种子，并确保输出目录存在
     np.random.seed(RANDOM_SEED)
     os.makedirs("output", exist_ok=True)
 
@@ -656,11 +643,6 @@ def run_experiment() -> None:
         return loss_c, cum_c
 
     def run_with_selector(sel) -> Tuple[List[float], List[float]]:
-        """运行给定基线选择器（如 RandomBaseline/GreedyBaseline）。
-
-        该函数不更新学习模型，仅用于对比不同启发式策略的表现。
-        返回本策略下每步 loss 以及累计净收益曲线。
-        """
         workers = _clone_workers(base_workers)
         replicator = TaskReplicator(
             context_dim=7,
@@ -679,13 +661,7 @@ def run_experiment() -> None:
         cum = 0.0
         np.random.seed(RANDOM_SEED)
         for s in range(steps):
-            res = scheduler.step_with_selector(
-                task_stream[s],
-                batch_size,
-                sel,
-                update_model=False,
-                eval_net_fn=scheduler.evaluate_reward2,
-            )
+            res = scheduler.step_with_selector(task_stream[s], batch_size, sel, update_model=False)
             loss_c.append(res["loss"])
             cum += res["realized_net"]
             cum_c.append(cum)
@@ -699,11 +675,6 @@ def run_experiment() -> None:
 
     # Oracle policy (for cumulative reward plot)
     def run_oracle() -> Tuple[List[float], List[float]]:
-        """Oracle（带虚拟节点，允许不匹配）用于提供上界参考。
-
-        使用真实成功概率评估净收益，不进行学习更新，理论上本策略的 loss 约为 0。
-        返回每步 loss 以及累计净收益曲线。
-        """
         workers = _clone_workers(base_workers)
         replicator = TaskReplicator(
             context_dim=7,
@@ -767,6 +738,88 @@ def run_experiment() -> None:
     print("Saved loss (Original/Random) and cumulative reward (Original/Random/Oracle) plots.")
 
     return
+
+
+
+def run_demo() -> None:
+    # 固定随机种子，保证模拟可复现
+    np.random.seed(RANDOM_SEED)
+    # 初始化工人资源
+    workers = [
+        Worker(0, 25, 800, 3.0, 250, 1),
+        Worker(1, 40, 400, 3.5, 300, 2),
+        Worker(2, 5, 150, 2.5, 100, 0),
+        # ...更多工人
+    ]
+    # 补充到 10 个工人示例
+    for i in range(3, 10):
+        workers.append(
+            Worker(
+                i,
+                np.random.uniform(0, WORKER_FEATURE_VALUES_RANGE["driving_speed"][1]),
+                np.random.uniform(0, WORKER_FEATURE_VALUES_RANGE["bandwidth"][1]),
+                np.random.uniform(2, WORKER_FEATURE_VALUES_RANGE["processor_performance"][1]),
+                np.random.uniform(100, WORKER_FEATURE_VALUES_RANGE["data_size"][1]),
+                np.random.randint(0, WORKER_FEATURE_VALUES_RANGE["task_type"][1] + 1),
+            )
+        )
+
+    normalizer = ContextNormalizer()
+    # 注意：此处的构造参数名与实现保持一致（例如 partition_split_threshold）
+    replicator = TaskReplicator(
+        context_dim=2,
+        partition_split_threshold=10,
+        budget=1,
+        replication_cost=0.1,
+        max_partition_depth=MAX_PARTITION_DEPTH,
+    )
+    scheduler = Scheduler(workers, normalizer, replicator)
+    # 确保输出目录存在
+    os.makedirs("output", exist_ok=True)
+
+    # 模拟任务流，多轮调度
+    for step_i in range(300):
+        # 模拟每步新任务到达：任务类型 0~9 随机，数据大小 100~3000MB，deadline 1~3 秒
+        new_tasks: List[Task] = []
+        for _ in range(np.random.randint(6, 16)):
+            task_type = np.random.randint(0, 10)
+            data_size = np.random.uniform(100, 3000)
+            deadline = np.random.uniform(1, 3)
+            new_tasks.append(Task(-1, task_type, data_size, deadline))  # task_id 自动分配
+
+        scheduler.step(new_tasks, batch_size=10)  # 每轮调度最多 5 个任务
+
+        if step_i % 10 == 0:
+            print(f"--- After {step_i} steps ---")
+            visualizer = PartitionVisualizer(replicator.partitions)
+            # 保存分区可视化到文件，避免阻塞显示窗口
+            os.makedirs("output", exist_ok=True)
+            visualizer.plot_2d_partitions(
+                dim_x=0,
+                dim_y=1,
+                iteration=step_i,
+                save_path=f"output/partition_{step_i}.png",
+            )
+
+    # 所有步骤完成后，保存 loss 曲线到文件 output/loss.png
+    try:
+        import matplotlib.pyplot as plt
+
+        os.makedirs("output", exist_ok=True)
+        plt.figure(figsize=(8, 4))
+        plt.plot(range(len(LOSS_HISTORY)), LOSS_HISTORY, label="loss", color="tab:red")
+        plt.title("Loss over Steps")
+        plt.xlabel("Step")
+        plt.ylabel("Loss")
+
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig("output/loss.png", dpi=150)
+        plt.close()
+        print("Saved loss curve to output/loss.png")
+    except Exception as e:
+        print(f"Failed to save loss curve: {e}")
 
 
 if __name__ == "__main__":

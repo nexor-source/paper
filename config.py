@@ -53,7 +53,7 @@ PARTITION_SPLIT_TOP_K = 1
 
 # Baseline/Comparison experiment settings
 RUN_COMPARISON = True
-COMPARISON_STEPS = 300
+COMPARISON_STEPS = 600
 COMPARISON_BATCH_SIZE = 10
 ARRIVALS_PER_STEP = (6, 16)  # inclusive min,max
 ENABLE_WORKER_DYNAMICS_COMPARISON = True  # 由于所有baseline采用了相同的randomseed，所以随机结果是相同的

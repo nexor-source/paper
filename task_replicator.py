@@ -201,61 +201,166 @@ class TaskReplicator:
         self.root_partition = ContextSpacePartition(bounds=[(0,1)]*context_dim)
         self.partitions = [self.root_partition]
         self.partition_split_threshold = partition_split_threshold
+
+        # 调试用的计数器
+        self._run_counter = 0
     
-    def select_assignments(self, candidate_assignments: List[Assignment]):
-        """对候选工人-任务对进行最优匹配选择
+    def _debug_print_assignment_table(self, task_ids, worker_ids, net_matrix, selected_set,
+                                     max_rows=30, max_cols=30, digits=3):
+        """打印任务×工人净收益表：选中=[v]，未选中=(v)，无候选=--
 
-        Args:
-            candidate_assignments (List[Assignment]): 候选工人-任务对列表，长度 n。
-
-        Returns:
-            List[Assignment]: 选中的工人-任务分配列表，长度 m。
+        说明：
+        - net_matrix 期望为 shape=(len(task_ids), len(worker_ids)) 的二维数组/ndarray，
+          非候选位置可用 NaN 或 +/-Inf 标记；函数将把非有限值视作“无候选”。
+        - selected_set 为 {(task_id, worker_id), ...} 的集合，用于高亮被选中的配对。
         """
-        # 建立映射 map{Assignment: ContextSpacePartition}
-        partition_map = {a: self.root_partition.find_partition(a.context) for a in candidate_assignments}
-        
-        # 获得所有任务与工人的id集合
-        task_ids = sorted(set(a.task_id for a in candidate_assignments))
-        worker_ids = sorted(set(a.worker_id for a in candidate_assignments))
-        # 将任务和工人的id重新映射为矩阵索引(0~n-1)
-        task_idx = {task: i for i, task in enumerate(task_ids)}  
-        worker_idx = {worker: j for j, worker in enumerate(worker_ids)}
-        
-        # 初始化收益矩阵（任务×工人），匈牙利算法求最小成本匹配，
-        # 因此收益取负值，未探索划分质量赋大正数（此处为极大负值对应正收益）
-        LARGE_VALUE = 1e6
-        cost_matrix = np.full((len(task_ids), len(worker_ids)), -LARGE_VALUE)
-        
-        # 填充收益矩阵
+        # 兼容 Assignment 集合：若传入为 Assignment 对象集合，则转为 (task_id, worker_id)
+        try:
+            _it = iter(selected_set)
+            _sample = next(_it) if selected_set else None
+        except Exception:
+            _sample = None
+        if _sample is not None and not (isinstance(_sample, tuple) and len(_sample) == 2):
+            try:
+                selected_set = {(getattr(x, 'task_id'), getattr(x, 'worker_id')) for x in selected_set}
+            except Exception:
+                selected_set = set()
+
+        # 可选截断，避免过大输出
+        t_ids = task_ids[:max_rows]
+        w_ids = worker_ids[:max_cols]
+        # 头部
+        col_head = ["task\\worker"] + [str(w) for w in w_ids]
+        col_widths = [max(len(col_head[0]), 12)] + [max(len(str(w)), 8) for w in w_ids]
+        def fmt_cell(s, w): 
+            s = str(s)
+            return s + " " * max(0, w - len(s))
+        print("\n=== Assignment Check (every 100 runs) ===")
+        print(" | ".join(fmt_cell(h, col_widths[i]) for i, h in enumerate(col_head)))
+        print("-" * (sum(col_widths) + 3*len(col_widths)))
+
+        for ti, t in enumerate(t_ids):
+            row_cells = [fmt_cell(str(t), col_widths[0])]
+            for wj, w in enumerate(w_ids):
+                # 支持 ndarray 与 list-of-lists 两种索引方式
+                try:
+                    v = net_matrix[ti, wj]
+                except Exception:
+                    v = net_matrix[ti][wj]
+                # 允许用 NaN / +/-Inf / None 表示“无候选”
+                try:
+                    is_valid = np.isfinite(v)
+                except Exception:
+                    # 对非常规类型做兜底
+                    try:
+                        is_valid = np.isfinite(float(v))
+                    except Exception:
+                        is_valid = False
+                if (v is None) or (not is_valid):  # 非候选
+                    cell = "--"
+                else:
+                    mark_left, mark_right = ("[", "]") if (t, w) in selected_set else ("(", ")")
+                    try:
+                        cell = f"{mark_left}{float(v):.{digits}f}{mark_right}"
+                    except Exception:
+                        cell = f"{mark_left}{v}{mark_right}"
+                row_cells.append(fmt_cell(cell, col_widths[wj+1]))
+            print(" | ".join(row_cells))
+        print("=== End ===\n")
+        return
+
+    # 覆盖式统一接口：允许通过参数控制是否可不匹配
+    def select_assignments(self, candidate_assignments: List[Assignment], allow_unmatch: bool = True):
+        """选择工-任务匹配（允许通过参数控制是否可不匹配）。
+
+        - allow_unmatch=True：允许任务或工人不匹配（虚拟节点成本0）；
+        - allow_unmatch=False：尽量匹配（不匹配成本为极大常数）。最终仅返回净收益>0的匹配。
+        """
+        if not candidate_assignments:
+            return []
+
+        task_ids = sorted({a.task_id for a in candidate_assignments})
+        worker_ids = sorted({a.worker_id for a in candidate_assignments})
+        task_idx = {t: i for i, t in enumerate(task_ids)}
+        worker_idx = {w: j for j, w in enumerate(worker_ids)}
+        m, n = len(task_ids), len(worker_ids)
+
+        # 净收益矩阵（非候选 = -inf）
+        profits = np.full((m, n), -np.inf, dtype=float)
+        pair2a = {}
         for a in candidate_assignments:
-            i = task_idx[a.task_id]
-            j = worker_idx[a.worker_id]
-            p = partition_map[a]
-            #  # 未被探索的划分赋极大估计质量，保证算法探索
-            # if p.sample_count == 0:
-            #     estimated_quality = LARGE_VALUE
-            # else:
-            #     estimated_quality = p.estimated_quality
-            # 极大探索权重有点过，改为使用后验均值
-            estimated_quality = p.posterior_mean()
-            net_quality = estimated_quality - self.replication_cost
-            cost_matrix[i, j] = -net_quality  # 转为成本矩阵，匈牙利算法求最小值
-        
-        # 使用匈牙利算法求最大匹配（最小成本匹配）
-        row_ind, col_ind = linear_sum_assignment(cost_matrix)
-        
-        selected = []
+            i, j = task_idx[a.task_id], worker_idx[a.worker_id]
+            p_mean = self.root_partition.find_partition(a.context).posterior_mean()
+            net = float(p_mean - self.replication_cost)
+            profits[i, j] = net
+            pair2a[(a.task_id, a.worker_id)] = a
+
+        size = m + n
+        VERY_LARGE_COST = 1e12
+        UNMATCH_COST = 0.0 if allow_unmatch else VERY_LARGE_COST
+        cost_square = np.zeros((size, size), dtype=float)
+
+        # 左上：真实匹配成本；非候选设为极大成本
+        cost_square[:m, :n] = VERY_LARGE_COST
+        valid_mask = np.isfinite(profits)
+        cost_square[:m, :n][valid_mask] = -profits[valid_mask]
+
+        # 右上/左下：不匹配成本
+        if not allow_unmatch:
+            if m > 0:
+                cost_square[:m, n:n + m] = UNMATCH_COST
+            if n > 0:
+                cost_square[m:m + n, :n] = UNMATCH_COST
+
+        row_ind, col_ind = linear_sum_assignment(cost_square)
+
+        EPS = 1e-12
+        selected: List[Assignment] = []
         for i, j in zip(row_ind, col_ind):
-            # 只选净收益大于0的匹配，避免选负收益方案
-            if -cost_matrix[i, j] > 0:
-                task = task_ids[i]
-                worker = worker_ids[j]
-                # 找到对应assignment对象并加入结果
-                for a in candidate_assignments:
-                    if a.task_id == task and a.worker_id == worker:
+            if i < m and j < n:
+                net = profits[i, j]
+                if net > EPS:
+                    a = pair2a.get((task_ids[i], worker_ids[j]))
+                    if a is not None:
                         selected.append(a)
-                        break
+        
+        # Debug: 每100轮打印一次候选净收益与被选配对
+        try:
+            self._run_counter += 1
+        except Exception:
+            self._run_counter = 1
+        if (self._run_counter % 10000) == 0:
+            try:
+                # 构造包含虚拟行/列的方阵视图，直观展示不匹配情况
+                t_ids_sq = list(task_ids) + [f"__DUMMY_T_{k}" for k in range(n)]
+                w_ids_sq = list(worker_ids) + [f"__DUMMY_W_{k}" for k in range(m)]
+                size_sq = m + n
+                net_square = np.full((size_sq, size_sq), np.nan, dtype=float)
+                # 真实候选净收益
+                net_square[:m, :n] = profits
+                # 不匹配成本对应的“净收益”显示：允许不匹配时显示为 0；否则显示为空
+                if allow_unmatch:
+                    if m > 0:
+                        net_square[:m, n:n + m] = 0.0  # 任务 -> 虚拟工人
+                    if n > 0:
+                        net_square[m:m + n, :n] = 0.0  # 虚拟任务 -> 工人
+
+                # 选中配对（包括落在虚拟行/列的“未匹配”）
+                selected_pairs_sq = set()
+                for i, j in zip(row_ind, col_ind):
+                    ri = t_ids_sq[i]
+                    cj = w_ids_sq[j]
+                    if i < m and j < n:
+                        if profits[i, j] > EPS:
+                            selected_pairs_sq.add((ri, cj))
+                    elif allow_unmatch:
+                        selected_pairs_sq.add((ri, cj))
+
+                self._debug_print_assignment_table(t_ids_sq, w_ids_sq, net_square, selected_pairs_sq)
+            except Exception as _e:
+                print(f"[debug] print assignment table failed: {_e}")
         return selected
+
     
     def update_assignments_reward(self, selected_assignments: List[Assignment], rewards: dict):
         """更新选中分配的奖励并判断是否细分

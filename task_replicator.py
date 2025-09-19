@@ -389,7 +389,6 @@ class TaskReplicator:
 if __name__ == "__main__":
     # 参数定义
     CONTEXT_DIM = 7
-    PARTITION_SPLIT_THRESHOLD = 10
     REPLICATION_COST = 0.1
     BUDGET = 1
     

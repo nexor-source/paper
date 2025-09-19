@@ -617,7 +617,7 @@ def run_experiment() -> None:
         workers = _clone_workers(base_workers)
         replicator = TaskReplicator(
             context_dim=7,
-            partition_split_threshold=10,
+            partition_split_threshold=PARTITION_SPLIT_THRESHOLD,
             budget=1,
             replication_cost=0.1,
             max_partition_depth=MAX_PARTITION_DEPTH,
@@ -664,7 +664,7 @@ def run_experiment() -> None:
         workers = _clone_workers(base_workers)
         replicator = TaskReplicator(
             context_dim=7,
-            partition_split_threshold=10,
+            partition_split_threshold=PARTITION_SPLIT_THRESHOLD,
             budget=1,
             replication_cost=0.1,
             max_partition_depth=MAX_PARTITION_DEPTH,
@@ -707,7 +707,7 @@ def run_experiment() -> None:
         workers = _clone_workers(base_workers)
         replicator = TaskReplicator(
             context_dim=7,
-            partition_split_threshold=10,
+            partition_split_threshold=PARTITION_SPLIT_THRESHOLD,
             budget=1,
             replication_cost=0.1,
             max_partition_depth=MAX_PARTITION_DEPTH,

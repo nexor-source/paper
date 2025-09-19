@@ -50,6 +50,7 @@ MAX_PARTITION_DEPTH = 8
 # - 'topk': 沿区间长度排名前 K 的维度二分，产生 2^K 子区（由 PARTITION_SPLIT_TOP_K 控制）
 PARTITION_SPLIT_STRATEGY = 'longest'
 PARTITION_SPLIT_TOP_K = 1
+PARTITION_SPLIT_THRESHOLD = 10
 
 # Baseline/Comparison experiment settings
 RUN_COMPARISON = True

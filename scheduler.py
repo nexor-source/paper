@@ -163,7 +163,7 @@ class Scheduler:
         candidates: List[Assignment] = []
         for task in tasks:
             for worker in self.workers:
-                # Keep order aligned with evaluate_reward_complex indices
+                # 需要保证 raw_context 必!须!是!这!个!顺!序! 以匹配 evaluate_reward_complex 函数使用 index 来读取特征
                 raw_context = {
                     "driving_speed": float(worker.driving_speed),
                     "bandwidth": float(worker.bandwidth),
@@ -230,7 +230,7 @@ class Scheduler:
 
 
     def _apply_worker_dynamics(self) -> None:
-        """模拟工人来去与能力漂移（使用全局 np.random，配合固定种子可复现）。"""
+        """模拟实现工人的离开，新增和属性漂移（使用全局 np.random）。"""
         # 保障 next_worker_id 存在
         if not hasattr(self, "next_worker_id"):
             self.next_worker_id = (max((w.worker_id for w in self.workers), default=-1) + 1)
@@ -384,7 +384,7 @@ class Scheduler:
 
         eps = 1e-6
 
-        # Positive part: diminishing returns + interactions
+        # 特征积极部分：边际效益递减(平方根) + 相互作用
         pos_basic = (
             0.35 * np.sqrt(driving_speed + eps)
             + 0.35 * np.sqrt(bandwidth + eps)
@@ -395,7 +395,7 @@ class Scheduler:
             + 0.10 * np.sqrt((bandwidth * processor_perf) + eps)
         )
 
-        # Negative part: convex penalties
+        # 负面部分：斜率递增惩罚项
         neg = (
             0.25 * (distance ** 1.5)
             + 0.20 * (data_size ** 1.2)
@@ -485,11 +485,11 @@ class Scheduler:
         eval_net_fn: Optional[Callable[[np.ndarray], float]] = None,
     ) -> Dict[str, float]:
         """通用一步：自定义 selector 进行分配，可选更新模型，返回指标。"""
-        # 1. 新任务入队
+        # 1. 新任务 new_tasks 入队
         for task in new_tasks:
             self.task_queue.add_task(task.task_type, task.data_size, task.deadline)
 
-        # 2. 取批任务准备调度
+        # 2. 取 batch_size 大小的批任务准备调度
         tasks_to_schedule = self.task_queue.get_tasks_batch(batch_size)
         if not tasks_to_schedule:
             self.time += 1
@@ -573,13 +573,15 @@ def run_experiment() -> None:
     os.makedirs("output", exist_ok=True)
 
     # 基础工人集
-    base_workers: List[Worker] = [
-        # 固定的三个样例工人
-        # id, speed, bw, cpu, distance, weather
-        Worker(0, 25, 800, 3.0, 250, 1),
-        Worker(1, 40, 400, 3.5, 300, 2),
-        Worker(2, 5, 150, 2.5, 100, 0),
-    ]
+    base_workers: List[Worker] = []
+    # base_workers: List[Worker] = [
+    #     # 固定的三个样例工人
+    #     # id, speed, bw, cpu, distance, weather
+    #     Worker(0, 25, 800, 3.0, 250, 1),
+    #     Worker(1, 40, 400, 3.5, 300, 2),
+    #     Worker(2, 5, 150, 2.5, 100, 0),
+    # ]
+
     for i in range(3, 10):
         base_workers.append(
             Worker(
@@ -619,7 +621,7 @@ def run_experiment() -> None:
             context_dim=7,
             partition_split_threshold=PARTITION_SPLIT_THRESHOLD,
             budget=1,
-            replication_cost=0.1,
+            replication_cost=REPLICATION_COST,
             max_partition_depth=MAX_PARTITION_DEPTH,
         )
         scheduler = Scheduler(
@@ -666,7 +668,7 @@ def run_experiment() -> None:
             context_dim=7,
             partition_split_threshold=PARTITION_SPLIT_THRESHOLD,
             budget=1,
-            replication_cost=0.1,
+            replication_cost=REPLICATION_COST,
             max_partition_depth=MAX_PARTITION_DEPTH,
         )
         scheduler = Scheduler(
@@ -709,7 +711,7 @@ def run_experiment() -> None:
             context_dim=7,
             partition_split_threshold=PARTITION_SPLIT_THRESHOLD,
             budget=1,
-            replication_cost=0.1,
+            replication_cost=REPLICATION_COST,
             max_partition_depth=MAX_PARTITION_DEPTH,
         )
         scheduler = Scheduler(

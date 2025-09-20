@@ -19,7 +19,7 @@ RANDOM_SEED = 42
 # - leave_prob: 现有工人每一步离开的概率（独立）
 # - join_prob: 每一步触发新增工人的概率
 # - join_count_range: 触发新增时新增工人数的闭区间范围（含端点）
-# - drift_frac: 各属性相对其取值范围宽度的高斯噪声标准差比例（边界处会裁剪）
+# - drift_frac: 各属性相对其取值范围宽度的高斯噪声标准差*比例*（边界处会裁剪）
 # - weather_change_prob: 每步天气状态变动概率（类别 0..4 中随机）
 WORKER_DYNAMICS = {
     "leave_prob": 0.025,
@@ -56,11 +56,23 @@ PARTITION_SPLIT_THRESHOLD = 10
 RUN_COMPARISON = True
 COMPARISON_STEPS = 600
 COMPARISON_BATCH_SIZE = 10
-ARRIVALS_PER_STEP = (6, 16)  # inclusive min,max
+ARRIVALS_PER_STEP = (6, 16)  # 每个时刻到达的任务数量的上下限
 ENABLE_WORKER_DYNAMICS_COMPARISON = True  # 由于所有baseline采用了相同的randomseed，所以随机结果是相同的
 
 # 算法模拟worker的特征的时候混入了task的特征
 
 # 注释统一度量
 
-# 
+# 添加新的函数 spawn_new_worker ，每次创建新的 worker 时直接调用，将原来生成 worker 的逻辑集中在一个地方，方便维护和修改
+
+# evaluate_reward_complex 函数通过固定的函数来计算工人和任务的特征，最终给出一个 0 ~ 1 之间的值，作为一个 worker-task 是否能够完成任务的一个概率
+# 并且通过这样的概率，来作为 worker-task 的奖励。但这样的奖励过于具体化，我们还需要在其之上添加一些随机性，以便更好地模拟真实场景中的不确定性。
+# 具体来说，我们可以在奖励上添加一个高斯噪声项，因为我们算法的本质相当于是动态划分上下文空间的多臂老虎机模拟，在原版的多臂老虎机中，据说奖励是随机的，
+# 这样添加随机噪声也符合算法的基本设定，你觉得呢，如果你也是这么觉得的那就直接开始做出更改吧
+
+# 代码中不仅 oracle 在选择的时候使用的是 匈牙利匹配的算法，我们的算法在选择的时候也是使用了匈牙利匹配算法，
+# 而两处的代码有些重复了，是否可以考虑将匈牙利算法抽象出来作为一个新的函数
+
+# scheduler.py 的 step 方法已经废弃了
+
+REPLICATION_COST = 0.1  # 默认的复制成本

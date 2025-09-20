@@ -4,7 +4,8 @@ from config import WORKER_FEATURE_VALUES_RANGE
 
 class ContextNormalizer:
     """
-    上下文特征归一化器，将真实世界特征映射到 [0,1] 区间，
+    上下文特征归一化器，使用config中定义的各个特征的最大值，
+    将真实世界特征映射到 [0,1] 区间，
     支持数值型和类别型特征。
     """
 

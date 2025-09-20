@@ -16,10 +16,8 @@ class RandomBaseline:
     def select(self, candidates: List[Assignment], eval_net: Callable[[Assignment], float]) -> List[Assignment]:
         if not candidates:
             return []
-        # Filter by positive net reward
-        valid = [a for a in candidates if eval_net(a) > 0.0]
-        if not valid:
-            return []
+        # 随机选择不需要对 candidates 做任何过滤，不使用 eval_net
+        valid = candidates
 
         # Shuffle and greedily pick unique task/worker pairs
         idx = np.arange(len(valid))

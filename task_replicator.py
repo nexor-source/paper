@@ -1,6 +1,6 @@
 import numpy as np
 from typing import List, Tuple, Optional
-from scipy.optimize import linear_sum_assignment
+from matching_utils import run_hungarian_matching
 from config import *
 
 class ContextSpacePartition:
@@ -295,35 +295,15 @@ class TaskReplicator:
             profits[i, j] = net
             pair2a[(a.task_id, a.worker_id)] = a
 
-        size = m + n
-        VERY_LARGE_COST = 1e12
-        UNMATCH_COST = 0.0 if allow_unmatch else VERY_LARGE_COST
-        cost_square = np.zeros((size, size), dtype=float)
-
-        # 左上：真实匹配成本；非候选设为极大成本
-        cost_square[:m, :n] = VERY_LARGE_COST
-        valid_mask = np.isfinite(profits)
-        cost_square[:m, :n][valid_mask] = -profits[valid_mask]
-
-        # 右上/左下：不匹配成本
-        if not allow_unmatch:
-            if m > 0:
-                cost_square[:m, n:n + m] = UNMATCH_COST
-            if n > 0:
-                cost_square[m:m + n, :n] = UNMATCH_COST
-
-        row_ind, col_ind = linear_sum_assignment(cost_square)
-
         EPS = 1e-12
-        selected: List[Assignment] = []
-        for i, j in zip(row_ind, col_ind):
-            if i < m and j < n:
-                net = profits[i, j]
-                if net > EPS:
-                    a = pair2a.get((task_ids[i], worker_ids[j]))
-                    if a is not None:
-                        selected.append(a)
-        
+        selected, row_ind, col_ind = run_hungarian_matching(
+            task_ids,
+            worker_ids,
+            profits,
+            pair2a,
+            allow_unmatch=allow_unmatch,
+            eps=EPS,
+        )
         # Debug: 每100轮打印一次候选净收益与被选配对
         try:
             self._run_counter += 1

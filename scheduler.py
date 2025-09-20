@@ -1,8 +1,8 @@
-import numpy as np
+﻿import numpy as np
 import os
 from collections import deque
 from typing import List, Dict, Callable, Tuple, Optional
-from scipy.optimize import linear_sum_assignment
+from matching_utils import run_hungarian_matching
 
 # 你之前定义的 ContextNormalizer, Assignment, TaskReplicator 类这里省略，假设已经实现并导入
 from normalizer import ContextNormalizer
@@ -69,6 +69,38 @@ class Worker:
         self.processor_perf = processor_perf
         self.physical_distance = physical_distance
         self.weather = weather
+
+
+
+
+def spawn_new_worker(worker_id: int, rng: Optional[np.random.Generator] = None) -> Worker:
+    """Sample a new Worker using WORKER_FEATURE_VALUES_RANGE."""
+    ranges = WORKER_FEATURE_VALUES_RANGE
+
+    if rng is None:
+        uniform = np.random.uniform
+        randint_fn = np.random.randint
+    else:
+        uniform = rng.uniform
+        if hasattr(rng, 'integers'):
+            randint_fn = rng.integers
+        else:
+            randint_fn = rng.randint
+
+    ds_min, ds_max = ranges.get('driving_speed', (0.0, 0.0))
+    bw_min, bw_max = ranges.get('bandwidth', (0.0, 0.0))
+    pp_min, pp_max = ranges.get('processor_performance', (1.0, 1.0))
+    pd_min, pd_max = ranges.get('physical_distance', (0.0, 0.0))
+    weather_min, weather_max = ranges.get('weather', (0, 0))
+
+    return Worker(
+        worker_id,
+        float(uniform(ds_min, ds_max)),
+        float(uniform(bw_min, bw_max)),
+        float(uniform(pp_min, pp_max)),
+        float(uniform(pd_min, pd_max)),
+        int(randint_fn(int(weather_min), int(weather_max) + 1)),
+    )
 
 
 class TaskQueue:
@@ -207,24 +239,14 @@ class Scheduler:
             profits[i, j] = net
             pair2a[(a.task_id, a.worker_id)] = a
 
-        # 构造 (m+n) × (m+n) 的成本矩阵
-        size = m + n
-        cost_square = np.zeros((size, size), dtype=float)
-
-        cost_square[:m, :n] = -profits
-
-        # 最小化版本求解
-        row_ind, col_ind = linear_sum_assignment(cost_square)
-
-        # 回收：仅保留“落在真实区 且 净收益>EPS”的匹配
-        selected: List[Assignment] = []
-        for i, j in zip(row_ind, col_ind):
-            if i < m and j < n:
-                net = profits[i, j]
-                if net > EPS:
-                    a = pair2a.get((task_ids[i], worker_ids[j]))
-                    if a is not None:
-                        selected.append(a)
+        selected, _row_ind, _col_ind = run_hungarian_matching(
+            task_ids,
+            worker_ids,
+            profits,
+            pair2a,
+            allow_unmatch=True,
+            eps=EPS,
+        )
         return selected
 
 
@@ -272,20 +294,7 @@ class Scheduler:
             if join_hi >= join_lo and join_lo >= 0:
                 n_join = int(np.random.randint(join_lo, join_hi + 1))
         for _ in range(n_join):
-            ds_min, ds_max = WORKER_FEATURE_VALUES_RANGE.get("driving_speed", (0.0, 40.0))
-            bw_min, bw_max = WORKER_FEATURE_VALUES_RANGE.get("bandwidth", (0.0, 1000.0))
-            pp_min, pp_max = WORKER_FEATURE_VALUES_RANGE.get("processor_performance", (1.0, 5.0))
-            pd_min, pd_max = WORKER_FEATURE_VALUES_RANGE.get("physical_distance", (0.0, 1000.0))
-            weather_max = int(WORKER_FEATURE_VALUES_RANGE.get("weather", (0, 4))[1])
-
-            new_w = Worker(
-                self.next_worker_id,
-                float(np.random.uniform(ds_min, ds_max)),
-                float(np.random.uniform(bw_min, bw_max)),
-                float(np.random.uniform(pp_min, pp_max)),
-                float(np.random.uniform(pd_min, pd_max)),
-                int(np.random.randint(0, weather_max + 1)),
-            )
+            new_w = spawn_new_worker(self.next_worker_id)
             self.workers.append(new_w)
             self.next_worker_id += 1
 
@@ -583,16 +592,7 @@ def run_experiment() -> None:
     # ]
 
     for i in range(3, 10):
-        base_workers.append(
-            Worker(
-                i,
-                float(np.random.uniform(0, WORKER_FEATURE_VALUES_RANGE["driving_speed"][1])),
-                float(np.random.uniform(0, WORKER_FEATURE_VALUES_RANGE["bandwidth"][1])),
-                float(np.random.uniform(WORKER_FEATURE_VALUES_RANGE["processor_performance"][0], WORKER_FEATURE_VALUES_RANGE["processor_performance"][1])),
-                float(np.random.uniform(0, WORKER_FEATURE_VALUES_RANGE["physical_distance"][1])),
-                int(np.random.randint(0, WORKER_FEATURE_VALUES_RANGE["weather"][1] + 1)),
-            )
-        )
+        base_workers.append(spawn_new_worker(i))
 
     normalizer = ContextNormalizer()
 

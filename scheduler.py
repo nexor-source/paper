@@ -424,67 +424,6 @@ class Scheduler:
         p = 1.0 / (1.0 + np.exp(-3.0 * raw))
         return float(np.clip(p, 0.01, 0.99))
 
-    def step(self, new_tasks: List[Task], batch_size: int) -> None:
-        """执行一次调度时间步：入队新任务、批量选择、匹配与反馈更新
-
-        Args:
-            new_tasks (List[Task]): 新到达的任务列表（其 task_id 可为占位，最终入队时将重分配）。
-            batch_size (int): 本次调度最多出队参与匹配的任务数。
-
-        Returns:
-            None
-
-        Notes:
-            - 奖励在此处使用 `np.random.binomial(1, 0.6)` 进行模拟；实际系统应由执行反馈提供。
-            - 最终通过 `TaskReplicator.update_assignments_reward` 更新统计并触发可能的细分。
-        """
-        # 1. 新任务入队
-        for task in new_tasks:
-            self.task_queue.add_task(task.task_type, task.data_size, task.deadline)
-
-        # 2. 取批任务准备调度
-        tasks_to_schedule = self.task_queue.get_tasks_batch(batch_size)
-        if not tasks_to_schedule:
-            print("No tasks to schedule at time", self.time)
-            self.time += 1
-            return
-
-        # 2.5 工人动态（离开/新增/属性漂移）
-        self._apply_worker_dynamics()
-
-        # 3. 生成所有候选工人-任务对
-        candidates = self.generate_candidate_assignments(tasks_to_schedule)
-
-        # 4. 调用分配算法（允许不匹配）
-        selected_assignments = self.replicator.select_assignments(candidates, allow_unmatch=True)
-
-        # 4.1 计算基于真实概率的最优匹配（oracle）与一步 regret/loss
-        # 使用带虚拟节点的 Oracle 版本，允许不匹配
-        oracle_assignments = self._oracle_select_assignments(candidates)
-        alg_expected = self._expected_total_reward(selected_assignments)
-        oracle_expected = self._expected_total_reward(oracle_assignments)
-        step_loss = max(0.0, oracle_expected - alg_expected)
-        # 记录本步 loss 到全局列表
-        LOSS_HISTORY.append(float(step_loss))
-
-        # 5. 模拟执行和奖励（这里用随机模拟，真实场景由系统反馈）
-        rewards: Dict[Assignment, float] = {}
-        for a in selected_assignments:
-            # 自定义线性成功率
-            print(a.context)
-            p = self.evaluate_reward_complex(a.context)
-            # 模拟成功与否
-            rewards[a] = np.random.binomial(1, p)
-
-        # 6. 更新统计
-        self.replicator.update_assignments_reward(selected_assignments, rewards)
-
-        print(
-            f"Time {self.time}: Scheduled {len(selected_assignments)} assignments from {len(tasks_to_schedule)} tasks | "
-            f"expected={alg_expected:.4f}, oracle={oracle_expected:.4f}, loss={step_loss:.4f}"
-        )
-        self.time += 1
-
     def step_with_selector(
         self,
         new_tasks: List[Task],
@@ -657,12 +596,13 @@ def run_experiment() -> None:
                     print(f"[viz] failed to render partition at step {s}: {_e}")
         return loss_c, cum_c
 
-    def run_with_selector(sel) -> Tuple[List[float], List[float]]:
-        """运行给定基线选择器（如 RandomBaseline/GreedyBaseline）。
-
-        该函数不更新学习模型，仅用于对比不同启发式策略的表现。
-        返回本策略下每步 loss 以及累计净收益曲线。
-        """
+    def run_with_selector(
+        selector_factory,
+        *,
+        update_model: bool = False,
+        use_oracle_eval: bool = True,
+    ) -> Tuple[List[float], List[float]]:
+        """Run a baseline selector (e.g. RandomBaseline/GreedyBaseline)."""
         workers = _clone_workers(base_workers)
         replicator = TaskReplicator(
             context_dim=7,
@@ -677,16 +617,18 @@ def run_experiment() -> None:
             replicator,
             enable_worker_dynamics=bool(globals().get("ENABLE_WORKER_DYNAMICS_COMPARISON", False)),
         )
+        selector = selector_factory(replicator)
         loss_c, cum_c = [], []
         cum = 0.0
         np.random.seed(RANDOM_SEED)
+        eval_fn = scheduler.evaluate_reward_complex if use_oracle_eval else None
         for s in range(steps):
             res = scheduler.step_with_selector(
                 task_stream[s],
                 batch_size,
-                sel,
-                update_model=False,
-                eval_net_fn=scheduler.evaluate_reward_complex,
+                selector,
+                update_model=update_model,
+                eval_net_fn=eval_fn,
             )
             loss_c.append(res["loss"])
             cum += res["realized_net"]
@@ -694,11 +636,16 @@ def run_experiment() -> None:
         return loss_c, cum_c
 
     # Baselines
-    rand_selector = RandomBaseline()
-    rand_fn = lambda c, e: rand_selector.select(c, e)
-    greedy_selector = GreedyBaseline()
-    greedy_fn = lambda c, e: greedy_selector.select(c, e)
-
+    loss_r, cum_r = run_with_selector(
+        lambda _rep: RandomBaseline().select,
+        update_model=False,
+        use_oracle_eval=False,
+    )
+    loss_g, cum_g = run_with_selector(
+        lambda rep: GreedyBaseline(rep).select,
+        update_model=True,
+        use_oracle_eval=False,
+    )
     # Oracle policy (for cumulative reward plot)
     def run_oracle() -> Tuple[List[float], List[float]]:
         """Oracle（带虚拟节点，允许不匹配）用于提供上界参考。
@@ -736,8 +683,6 @@ def run_experiment() -> None:
         return loss_c, cum_c
 
     loss_o, cum_o = run_original()
-    loss_r, cum_r = run_with_selector(rand_fn)
-    loss_g, cum_g = run_with_selector(greedy_fn)
     loss_orc, cum_orc = run_oracle()
 
     plt.figure(figsize=(9, 4))

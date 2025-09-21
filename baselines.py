@@ -1,7 +1,7 @@
 import numpy as np
 from typing import List, Callable, Set, Optional
 
-from task_replicator import Assignment
+from task_replicator import Assignment, TaskReplicator
 
 
 class RandomBaseline:
@@ -16,7 +16,7 @@ class RandomBaseline:
     def select(self, candidates: List[Assignment], eval_net: Callable[[Assignment], float]) -> List[Assignment]:
         if not candidates:
             return []
-        # 随机选择不需要对 candidates 做任何过滤，不使用 eval_net
+        # Random selection keeps all candidates without using eval_net
         valid = candidates
 
         # Shuffle and greedily pick unique task/worker pairs
@@ -37,26 +37,30 @@ class RandomBaseline:
 
 
 class GreedyBaseline:
-    """
-    Greedy by true expected net reward: sort all candidate pairs by
-    evaluate_reward_complex(context) - cost and pick non-conflicting pairs.
-    """
+    """Greedy selector backed by a TaskReplicator without Hungarian matching."""
 
-    def select(self, candidates: List[Assignment], eval_net: Callable[[Assignment], float]) -> List[Assignment]:
+    def __init__(self, replicator: TaskReplicator):
+        self.replicator = replicator
+
+    def _estimated_net(self, assignment: Assignment) -> float:
+        partition = self.replicator.root_partition.find_partition(assignment.context)
+        return float(partition.posterior_mean() - self.replicator.replication_cost)
+
+    def select(self, candidates: List[Assignment], _eval_net: Callable[[Assignment], float]) -> List[Assignment]:
         if not candidates:
             return []
-        # Sort by net reward desc
-        ranked = sorted(candidates, key=lambda a: eval_net(a), reverse=True)
+        ranked = sorted(candidates, key=self._estimated_net, reverse=True)
         used_tasks: Set[int] = set()
         used_workers: Set[int] = set()
         selected: List[Assignment] = []
-        for a in ranked:
-            if eval_net(a) <= 0.0:
+        for assignment in ranked:
+            net = self._estimated_net(assignment)
+            if net <= 0.0:
                 break
-            if a.task_id in used_tasks or a.worker_id in used_workers:
+            if assignment.task_id in used_tasks or assignment.worker_id in used_workers:
                 continue
-            selected.append(a)
-            used_tasks.add(a.task_id)
-            used_workers.add(a.worker_id)
+            selected.append(assignment)
+            used_tasks.add(assignment.task_id)
+            used_workers.add(assignment.worker_id)
         return selected
 

@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib import cm
-from typing import List
+from typing import List, Optional, Dict
 
 
 class PartitionVisualizer:
@@ -17,23 +17,40 @@ class PartitionVisualizer:
         """
         self.partitions = partitions
 
-    def plot_2d_partitions(self, dim_x: int, dim_y: int, iteration: int, save_path: str = None) -> None:
-        """可视化上下文空间在指定两个维度上的划分结果，使用颜色表示期望奖励
+    def plot_2d_partitions(
+        self,
+        dim_x: int,
+        dim_y: int,
+        iteration: int,
+        save_path: Optional[str] = None,
+        slice_point: Optional[Dict[int, float]] = None,
+        default_slice_value: float = 0.52,
+    ) -> None:
+        """Visualize the partitioning on a 2D slice defined by two dimensions."""
 
-        Args:
-            dim_x (int): 第一个特征维度索引（如 0 代表车速）。
-            dim_y (int): 第二个特征维度索引（如 1 代表带宽）。
-            iteration (int): 当前迭代轮次，用于图表标题或保存文件命名。
-            save_path (str, optional): 图片保存路径。若为 None，则直接显示图表。
+        if not self.partitions:
+            return
 
-        Returns:
-            None
+        total_dims = len(self.partitions[0].bounds)
+        slice_point = slice_point or {}
+        eps = 1e-9
 
-        Notes:
-            - 每个矩形框代表一个划分单元（partition）。
-            - 矩形颜色表示期望奖励（estimated_quality），颜色越深表示奖励越高。
-            - 坐标范围固定在 [0,1] × [0,1]，对应归一化的上下文空间。
-        """
+        def matches_slice(partition) -> bool:
+            if total_dims <= 0:
+                return True
+            for dim in range(total_dims):
+                if dim in (dim_x, dim_y):
+                    continue
+                value = slice_point.get(dim, default_slice_value)
+                lo, hi = partition.bounds[dim]
+                if value < lo - eps or value > hi + eps:
+                    return False
+            return True
+
+        filtered = [p for p in self.partitions if matches_slice(p)]
+        if not filtered:
+            filtered = self.partitions
+
         fig, ax = plt.subplots(figsize=(8, 8))
         ax.set_title(f"Context Partition Visualization (Iteration {iteration})")
         ax.set_xlim(0, 1)
@@ -41,28 +58,19 @@ class PartitionVisualizer:
         ax.set_xlabel(f"Feature {dim_x}")
         ax.set_ylabel(f"Feature {dim_y}")
 
-        # 获取所有分区的期望奖励，用于归一化颜色
-        qualities = [p.estimated_quality for p in self.partitions]
-        # qualities = [p.estimated_quality for p in self.partitions if p.sample_count > 0]
+        qualities = [p.estimated_quality for p in filtered]
         if qualities:
             min_quality, max_quality = min(qualities), max(qualities)
         else:
-            min_quality, max_quality = 0, 1  # 默认范围
+            min_quality, max_quality = 0.0, 1.0
+        if max_quality - min_quality < 1e-9:
+            max_quality = min_quality + 1e-9
+        norm = plt.Normalize(vmin=min_quality, vmax=max_quality)
 
-        for p in self.partitions:
-            # 取当前划分在指定两个维度的上下界
-            x_min, x_max = p.bounds[dim_x]
-            y_min, y_max = p.bounds[dim_y]
-
-            # 根据期望奖励计算颜色
-            # if p.sample_count > 0:
-            #     normalized_quality = p.estimated_quality
-            #     # normalized_quality = (p.estimated_quality - min_quality) / (max_quality - min_quality + 1e-6)
-            #     color = cm.viridis(normalized_quality)  # 使用 Viridis 颜色映射
-            # else:
-            #     color = (1, 1, 1, 0)  # 空白区域为透明
-            normalized_quality = p.estimated_quality
-            color = cm.viridis(normalized_quality)
+        for partition in filtered:
+            x_min, x_max = partition.bounds[dim_x]
+            y_min, y_max = partition.bounds[dim_y]
+            color = cm.viridis(norm(partition.estimated_quality))
 
             rect = patches.Rectangle(
                 (x_min, y_min),
@@ -74,21 +82,19 @@ class PartitionVisualizer:
             )
             ax.add_patch(rect)
 
-            # 标记样本数量
-            if p.sample_count > 0:
+            if partition.sample_count > 0:
                 cx, cy = (x_min + x_max) / 2, (y_min + y_max) / 2
                 ax.text(
                     cx,
                     cy,
-                    f"{p.sample_count}",
+                    f"{partition.sample_count}",
                     color="white",
                     fontsize=10,
                     ha="center",
                     va="center",
                 )
 
-        # 添加颜色条
-        sm = plt.cm.ScalarMappable(cmap=cm.viridis, norm=plt.Normalize(vmin=min_quality, vmax=max_quality))
+        sm = plt.cm.ScalarMappable(cmap=cm.viridis, norm=norm)
         sm.set_array([])
         cbar = plt.colorbar(sm, ax=ax)
         cbar.set_label("Estimated Quality")

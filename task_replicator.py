@@ -365,6 +365,8 @@ class TaskReplicator:
                 if p in self.partitions:
                     self.partitions.remove(p)
                     self.partitions.extend(p.children)
+                else:
+                    print("Warning: subdividing a partition not in the main list.")
 
 if __name__ == "__main__":
     # 参数定义

@@ -42,7 +42,7 @@ PRIOR_CAP = 10
 
 # 最大允许的上下文划分层级（根为0）。达到该层级后不再细分。
 # 可按需调整，若不希望限制，可在创建 TaskReplicator 时传入 None 覆盖。
-MAX_PARTITION_DEPTH = 8
+MAX_PARTITION_DEPTH = 16
 
 # 分区细分策略：'all' | 'longest' | 'topk'
 # - 'all': 沿所有维度二分（原始行为），产生 2^d 子区
@@ -54,7 +54,7 @@ PARTITION_SPLIT_THRESHOLD = 10
 
 # Baseline/Comparison experiment settings
 RUN_COMPARISON = True
-COMPARISON_STEPS = 600
+COMPARISON_STEPS = 2000
 COMPARISON_BATCH_SIZE = 10
 ARRIVALS_PER_STEP = (6, 16)  # 每个时刻到达的任务数量的上下限
 ENABLE_WORKER_DYNAMICS_COMPARISON = True  # 由于所有baseline采用了相同的randomseed，所以随机结果是相同的

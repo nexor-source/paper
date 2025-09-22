@@ -582,7 +582,7 @@ def run_experiment() -> None:
             loss_c.append(res["loss"])
             cum += res["realized_net"]
             cum_c.append(cum)
-            if s % 10 == 0:
+            if s % 50 == 0:
                 try:
                     visualizer = PartitionVisualizer(replicator.partitions)
                     os.makedirs("output", exist_ok=True)

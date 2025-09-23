@@ -51,10 +51,10 @@ PARTITION_SPLIT_THRESHOLD = 10
 
 # Baseline/Comparison experiment settings
 RUN_COMPARISON = True
-COMPARISON_STEPS = 500
+COMPARISON_STEPS = 3000
 COMPARISON_BATCH_SIZE = 10
 ARRIVALS_PER_STEP = (6, 16)  # 每个时刻到达的任务数量的上下限
-ENABLE_WORKER_DYNAMICS_COMPARISON = False  # 由于所有baseline采用了相同的randomseed，所以随机结果是相同的
+ENABLE_WORKER_DYNAMICS_COMPARISON = True  # 由于所有baseline采用了相同的randomseed，所以随机结果是相同的
 
 # 算法模拟worker的特征的时候混入了task的特征
 

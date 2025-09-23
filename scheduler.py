@@ -503,6 +503,84 @@ def _clone_workers(workers: List["Worker"]) -> List["Worker"]:
     ]
 
 
+# 预生成工人动态时间线：给定初始工人与步数，离线模拟每一步的工人集合
+def _generate_worker_timeline(base_workers: List["Worker"], steps: int) -> List[List["Worker"]]:
+    rng = np.random.default_rng(int(globals().get("RANDOM_SEED", 42)))
+    # 读取配置
+    try:
+        dynamics = WORKER_DYNAMICS
+    except NameError:
+        dynamics = {
+            "leave_prob": 0.05,
+            "join_prob": 0.10,
+            "join_count_range": (0, 2),
+            "drift_frac": {
+                "driving_speed": 0.03,
+                "bandwidth": 0.05,
+                "processor_performance": 0.02,
+                "physical_distance": 0.05,
+            },
+            "weather_change_prob": 0.03,
+        }
+
+    leave_prob = float(dynamics.get("leave_prob", 0.05))
+    join_prob = float(dynamics.get("join_prob", 0.10))
+    join_lo, join_hi = dynamics.get("join_count_range", (0, 2))
+    drift_frac = dynamics.get("drift_frac", {})
+    weather_change_prob = float(dynamics.get("weather_change_prob", 0.03))
+
+    def clip(v: float, lo: float, hi: float) -> float:
+        return float(min(max(v, lo), hi))
+
+    ranges = WORKER_FEATURE_VALUES_RANGE
+
+    workers: List[Worker] = _clone_workers(base_workers)
+    next_worker_id = (max((w.worker_id for w in workers), default=-1) + 1)
+
+    timeline: List[List[Worker]] = []
+    for _s in range(steps):
+        # 1) 离开
+        keep_flags = [rng.random() >= leave_prob for _ in workers]
+        if any(keep_flags) is False and len(workers) > 0:
+            keep_flags[rng.integers(0, len(workers))] = True
+        workers = [w for w, keep in zip(workers, keep_flags) if keep]
+
+        # 2) 加入
+        n_join = 0
+        if rng.random() < join_prob:
+            if join_hi >= join_lo and join_lo >= 0:
+                n_join = int(rng.integers(int(join_lo), int(join_hi) + 1))
+        for _ in range(n_join):
+            workers.append(spawn_new_worker(next_worker_id, rng))
+            next_worker_id += 1
+
+        # 3) 漂移
+        for w in workers:
+            if "driving_speed" in drift_frac and "driving_speed" in ranges:
+                lo, hi = ranges["driving_speed"]
+                std = float(drift_frac["driving_speed"]) * (hi - lo)
+                w.driving_speed = clip(w.driving_speed + float(rng.normal(0.0, std)), lo, hi)
+            if "bandwidth" in drift_frac and "bandwidth" in ranges:
+                lo, hi = ranges["bandwidth"]
+                std = float(drift_frac["bandwidth"]) * (hi - lo)
+                w.bandwidth = clip(w.bandwidth + float(rng.normal(0.0, std)), lo, hi)
+            if "processor_performance" in drift_frac and "processor_performance" in ranges:
+                lo, hi = ranges["processor_performance"]
+                std = float(drift_frac["processor_performance"]) * (hi - lo)
+                w.processor_perf = clip(w.processor_perf + float(rng.normal(0.0, std)), lo, hi)
+            if "physical_distance" in drift_frac and "physical_distance" in ranges:
+                lo, hi = ranges["physical_distance"]
+                std = float(drift_frac["physical_distance"]) * (hi - lo)
+                w.physical_distance = clip(w.physical_distance + float(rng.normal(0.0, std)), lo, hi)
+            if rng.random() < weather_change_prob:
+                max_w = int(ranges.get("weather", (0, 4))[1])
+                w.weather = int(rng.integers(0, max_w + 1))
+
+        # 存储本步快照
+        timeline.append(_clone_workers(workers))
+
+    return timeline
+
 # 若启用对比实验，则优先运行并提前退出，避免执行下方旧版主流程
 def run_experiment() -> None:
     """统一的主实验入口。
@@ -554,6 +632,11 @@ def run_experiment() -> None:
             new_tasks.append(Task(-1, task_type, data_size, deadline))
         task_stream.append(new_tasks)
 
+    # 预生成工人时间线（如启用），确保各策略面向同一“世界线”
+    worker_timeline = None
+    if bool(globals().get("ENABLE_WORKER_DYNAMICS_COMPARISON", False)) and bool(globals().get("USE_PREGENERATED_WORKER_TIMELINE", True)):
+        worker_timeline = _generate_worker_timeline(base_workers, steps)
+
     from baselines import RandomBaseline, GreedyBaseline
     import matplotlib.pyplot as plt
 
@@ -572,10 +655,14 @@ def run_experiment() -> None:
             replicator,
             enable_worker_dynamics=bool(globals().get("ENABLE_WORKER_DYNAMICS_COMPARISON", False)),
         )
+        if worker_timeline is not None:
+            scheduler.enable_worker_dynamics = False
         loss_c, cum_c, assign_counts = [], [], []
         cum = 0.0
         np.random.seed(RANDOM_SEED)
         for s in range(steps):
+            if worker_timeline is not None:
+                scheduler.workers = _clone_workers(worker_timeline[s])
             res = scheduler.step_with_selector(
                 task_stream[s],
                 batch_size,
@@ -621,12 +708,16 @@ def run_experiment() -> None:
             replicator,
             enable_worker_dynamics=bool(globals().get("ENABLE_WORKER_DYNAMICS_COMPARISON", False)),
         )
+        if worker_timeline is not None:
+            scheduler.enable_worker_dynamics = False
         selector = selector_factory(replicator)
         loss_c, cum_c, assign_counts = [], [], []
         cum = 0.0
         np.random.seed(RANDOM_SEED)
         eval_fn = scheduler.evaluate_reward_complex if use_oracle_eval else None
         for s in range(steps):
+            if worker_timeline is not None:
+                scheduler.workers = _clone_workers(worker_timeline[s])
             res = scheduler.step_with_selector(
                 task_stream[s],
                 batch_size,
@@ -672,10 +763,14 @@ def run_experiment() -> None:
             replicator,
             enable_worker_dynamics=bool(globals().get("ENABLE_WORKER_DYNAMICS_COMPARISON", False)),
         )
+        if worker_timeline is not None:
+            scheduler.enable_worker_dynamics = False
         loss_c, cum_c, assign_counts = [], [], []
         cum = 0.0
         np.random.seed(RANDOM_SEED)
         for s in range(steps):
+            if worker_timeline is not None:
+                scheduler.workers = _clone_workers(worker_timeline[s])
             res = scheduler.step_with_selector(
                 task_stream[s],
                 batch_size,

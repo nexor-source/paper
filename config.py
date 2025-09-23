@@ -1,7 +1,4 @@
-# config.py
-
-MAX_PARTITION_DEPTH = 4
-
+﻿# config.py
 WORKER_FEATURE_VALUES_RANGE = {
     "driving_speed": (0.0, 40.0),       # 0-40 m/s (~0-144 km/h) 车辆行驶速度
     "bandwidth": (0.0, 1000.0),         # 0-1000 Mbps 当前可用带宽
@@ -35,14 +32,14 @@ WORKER_DYNAMICS = {
 }
 
 # 从父分区的真实样本里“借”百分之多少给子分区。
-LAMBDA_PRIOR = 0.5  
+LAMBDA_PRIOR = 0.5
 
 # 从父分区最多继承样本数
 PRIOR_CAP = 10
 
 # 最大允许的上下文划分层级（根为0）。达到该层级后不再细分。
 # 可按需调整，若不希望限制，可在创建 TaskReplicator 时传入 None 覆盖。
-MAX_PARTITION_DEPTH = 16
+MAX_PARTITION_DEPTH = 64
 
 # 分区细分策略：'all' | 'longest' | 'topk'
 # - 'all': 沿所有维度二分（原始行为），产生 2^d 子区
@@ -54,10 +51,10 @@ PARTITION_SPLIT_THRESHOLD = 10
 
 # Baseline/Comparison experiment settings
 RUN_COMPARISON = True
-COMPARISON_STEPS = 2000
+COMPARISON_STEPS = 500
 COMPARISON_BATCH_SIZE = 10
 ARRIVALS_PER_STEP = (6, 16)  # 每个时刻到达的任务数量的上下限
-ENABLE_WORKER_DYNAMICS_COMPARISON = True  # 由于所有baseline采用了相同的randomseed，所以随机结果是相同的
+ENABLE_WORKER_DYNAMICS_COMPARISON = False  # 由于所有baseline采用了相同的randomseed，所以随机结果是相同的
 
 # 算法模拟worker的特征的时候混入了task的特征
 

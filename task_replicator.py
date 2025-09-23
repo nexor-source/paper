@@ -357,7 +357,7 @@ class TaskReplicator:
             reward = rewards.get(a, 0)
             p.update_reward(reward)
             # 样本数达到阈值后进行二分细分（受最大层级限制）
-            if p.sample_count >= self.partition_split_threshold:
+            if p.sample_count >= self.partition_split_threshold + p.depth:
                 # 若设置了最大层级限制，且当前层级已达到或超过上限，则不再细分
                 if self.max_partition_depth is not None and p.depth >= self.max_partition_depth:
                     continue

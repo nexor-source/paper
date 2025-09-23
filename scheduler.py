@@ -486,6 +486,7 @@ class Scheduler:
             "realized_net": float(realized_net),
             "sel_workers": sorted({int(a.worker_id) for a in selected_assignments}),
             "sel_tasks": sorted({int(a.task_id) for a in selected_assignments}),
+            "assignment_count": len(selected_assignments),
         }
 
 def _clone_workers(workers: List["Worker"]) -> List["Worker"]:
@@ -520,6 +521,8 @@ def run_experiment() -> None:
     np.random.seed(RANDOM_SEED)
     os.makedirs("output", exist_ok=True)
 
+    debug_counts = bool(globals().get("DEBUG_ASSIGNMENT_COUNTS", True))
+
     # 基础工人集
     base_workers: List[Worker] = []
     # base_workers: List[Worker] = [
@@ -530,7 +533,7 @@ def run_experiment() -> None:
     #     Worker(2, 5, 150, 2.5, 100, 0),
     # ]
 
-    for i in range(3, 10):
+    for i in range(3, 50):
         base_workers.append(spawn_new_worker(i))
 
     normalizer = ContextNormalizer()
@@ -554,7 +557,7 @@ def run_experiment() -> None:
     from baselines import RandomBaseline, GreedyBaseline
     import matplotlib.pyplot as plt
 
-    def run_original() -> Tuple[List[float], List[float]]:
+    def run_original() -> Tuple[List[float], List[float], List[int]]:
         workers = _clone_workers(base_workers)
         replicator = TaskReplicator(
             context_dim=7,
@@ -569,7 +572,7 @@ def run_experiment() -> None:
             replicator,
             enable_worker_dynamics=bool(globals().get("ENABLE_WORKER_DYNAMICS_COMPARISON", False)),
         )
-        loss_c, cum_c = [], []
+        loss_c, cum_c, assign_counts = [], [], []
         cum = 0.0
         np.random.seed(RANDOM_SEED)
         for s in range(steps):
@@ -582,6 +585,7 @@ def run_experiment() -> None:
             loss_c.append(res["loss"])
             cum += res["realized_net"]
             cum_c.append(cum)
+            assign_counts.append(int(res.get("assignment_count", len(res.get("sel_tasks", [])))))
             if s % 50 == 0:
                 try:
                     visualizer = PartitionVisualizer(replicator.partitions)
@@ -594,14 +598,14 @@ def run_experiment() -> None:
                     )
                 except Exception as _e:
                     print(f"[viz] failed to render partition at step {s}: {_e}")
-        return loss_c, cum_c
+        return loss_c, cum_c, assign_counts
 
     def run_with_selector(
         selector_factory,
         *,
         update_model: bool = False,
         use_oracle_eval: bool = True,
-    ) -> Tuple[List[float], List[float]]:
+    ) -> Tuple[List[float], List[float], List[int]]:
         """Run a baseline selector (e.g. RandomBaseline/GreedyBaseline)."""
         workers = _clone_workers(base_workers)
         replicator = TaskReplicator(
@@ -618,7 +622,7 @@ def run_experiment() -> None:
             enable_worker_dynamics=bool(globals().get("ENABLE_WORKER_DYNAMICS_COMPARISON", False)),
         )
         selector = selector_factory(replicator)
-        loss_c, cum_c = [], []
+        loss_c, cum_c, assign_counts = [], [], []
         cum = 0.0
         np.random.seed(RANDOM_SEED)
         eval_fn = scheduler.evaluate_reward_complex if use_oracle_eval else None
@@ -633,21 +637,22 @@ def run_experiment() -> None:
             loss_c.append(res["loss"])
             cum += res["realized_net"]
             cum_c.append(cum)
-        return loss_c, cum_c
+            assign_counts.append(int(res.get("assignment_count", len(res.get("sel_tasks", [])))))
+        return loss_c, cum_c, assign_counts
 
     # Baselines
-    loss_r, cum_r = run_with_selector(
+    loss_r, cum_r, assign_r = run_with_selector(
         lambda _rep: RandomBaseline().select,
         update_model=False,
         use_oracle_eval=False,
     )
-    loss_g, cum_g = run_with_selector(
+    loss_g, cum_g, assign_g = run_with_selector(
         lambda rep: GreedyBaseline(rep).select,
         update_model=True,
         use_oracle_eval=False,
     )
     # Oracle policy (for cumulative reward plot)
-    def run_oracle() -> Tuple[List[float], List[float]]:
+    def run_oracle() -> Tuple[List[float], List[float], List[int]]:
         """Oracle（带虚拟节点，允许不匹配）用于提供上界参考。
 
         使用真实成功概率评估净收益，不进行学习更新，理论上本策略的 loss 约为 0。
@@ -667,7 +672,7 @@ def run_experiment() -> None:
             replicator,
             enable_worker_dynamics=bool(globals().get("ENABLE_WORKER_DYNAMICS_COMPARISON", False)),
         )
-        loss_c, cum_c = [], []
+        loss_c, cum_c, assign_counts = [], [], []
         cum = 0.0
         np.random.seed(RANDOM_SEED)
         for s in range(steps):
@@ -680,10 +685,36 @@ def run_experiment() -> None:
             loss_c.append(res["loss"])  # should be ~0 for oracle
             cum += res["realized_net"]
             cum_c.append(cum)
-        return loss_c, cum_c
+            assign_counts.append(int(res.get("assignment_count", len(res.get("sel_tasks", [])))))
+        return loss_c, cum_c, assign_counts
 
-    loss_o, cum_o = run_original()
-    loss_orc, cum_orc = run_oracle()
+    loss_o, cum_o, assign_o = run_original()
+    loss_orc, cum_orc, assign_orc = run_oracle()
+
+    if debug_counts:
+        assignment_counts = {
+            "Original": assign_o,
+            "Random": assign_r,
+            "Greedy": assign_g,
+            "Oracle": assign_orc,
+        }
+        base_counts = assignment_counts["Original"]
+        print("[assign-count] preview (first 10 steps):")
+        for name, seq in assignment_counts.items():
+            preview = seq[:10]
+            print(f"  {name:<8}: {preview}")
+        for name, seq in assignment_counts.items():
+            if name == "Original":
+                continue
+            if len(seq) != len(base_counts):
+                print(f"[assign-count] {name} length mismatch: {len(seq)} vs {len(base_counts)}")
+                continue
+            mismatches = [i for i, (a, b) in enumerate(zip(base_counts, seq)) if a != b]
+            if mismatches:
+                first = mismatches[0]
+                print(f"[assign-count] {name} differs at {len(mismatches)} steps; first mismatch step {first}: Original={base_counts[first]}, {name}={seq[first]}")
+            else:
+                print(f"[assign-count] {name} matches Original for all {len(base_counts)} steps")
 
     plt.figure(figsize=(9, 4))
     plt.plot(loss_o, label="Original")

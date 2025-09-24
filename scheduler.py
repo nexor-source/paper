@@ -812,16 +812,77 @@ def run_experiment() -> None:
                 print(f"[assign-count] {name} matches Original for all {len(base_counts)} steps")
 
     plt.figure(figsize=(9, 4))
-    plt.plot(loss_o, label="Original")
-    plt.plot(loss_r, label="Random")
-    plt.plot(loss_g, label="Greedy")
-    plt.title("Loss Comparison")
+    plt.plot(loss_o, label="Original", linewidth=1.0, alpha=0.7)
+    plt.plot(loss_r, label="Random", linewidth=1.0, alpha=0.7)
+    plt.plot(loss_g, label="Greedy", linewidth=1.0, alpha=0.7)
+    plt.title("Loss Comparison (raw)")
     plt.xlabel("Step")
     plt.ylabel("Loss")
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()
     plt.savefig("output/compare_loss.png", dpi=150)
+    plt.close()
+
+    # Additionally provide a smoothed view with rolling mean and quantile band
+    def _rolling_stats(arr, window=50, qlo=0.1, qhi=0.9):
+        arr = np.asarray(arr, dtype=float)
+        n = len(arr)
+        window = max(1, min(window, n))
+        if window == 1:
+            return arr, None, None
+        # rolling mean via convolution
+        kernel = np.ones(window, dtype=float) / float(window)
+        mean = np.convolve(arr, kernel, mode='valid')
+        # rolling quantiles (simple loop keeps it clear and small n)
+        lo, hi = [], []
+        for i in range(0, n - window + 1):
+            w = arr[i:i+window]
+            lo.append(float(np.quantile(w, qlo)))
+            hi.append(float(np.quantile(w, qhi)))
+        return mean, np.asarray(lo), np.asarray(hi)
+
+    smooth_win = int(globals().get("LOSS_SMOOTH_WINDOW", 50))
+    qlo = float(globals().get("LOSS_SMOOTH_QLO", 0.1))
+    qhi = float(globals().get("LOSS_SMOOTH_QHI", 0.9))
+    stride = int(globals().get("LOSS_DOWNSAMPLE", 1))
+    stride = max(1, stride)
+
+    def _prep(series):
+        m, l, h = _rolling_stats(series, window=smooth_win, qlo=qlo, qhi=qhi)
+        x = np.arange(len(m))
+        if stride > 1:
+            x = x[::stride]
+            m = m[::stride]
+            if l is not None and h is not None:
+                l = l[::stride]
+                h = h[::stride]
+        return x, m, l, h
+
+    xo, mo, lo_b, hi_b = _prep(loss_o)
+    xr, mr, lr_b, hr_b = _prep(loss_r)
+    xg, mg, lg_b, hg_b = _prep(loss_g)
+
+    plt.figure(figsize=(9, 4))
+    if lo_b is not None and hi_b is not None:
+        plt.fill_between(xo, lo_b, hi_b, color='C0', alpha=0.12)
+    plt.plot(xo, mo, label="Original (mean)", color='C0', linewidth=2.0)
+
+    if lr_b is not None and hr_b is not None:
+        plt.fill_between(xr, lr_b, hr_b, color='C1', alpha=0.12)
+    plt.plot(xr, mr, label="Random (mean)", color='C1', linewidth=2.0)
+
+    if lg_b is not None and hg_b is not None:
+        plt.fill_between(xg, lg_b, hg_b, color='C2', alpha=0.12)
+    plt.plot(xg, mg, label="Greedy (mean)", color='C2', linewidth=2.0)
+
+    plt.title(f"Loss (rolling mean, window={smooth_win})")
+    plt.xlabel("Step (offset by window)")
+    plt.ylabel("Loss")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("output/compare_loss_smooth.png", dpi=150)
     plt.close()
 
     plt.figure(figsize=(9, 4))

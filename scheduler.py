@@ -640,7 +640,7 @@ def run_experiment() -> None:
     from baselines import RandomBaseline, GreedyBaseline
     import matplotlib.pyplot as plt
 
-    def run_original() -> Tuple[List[float], List[float], List[int]]:
+    def run_original() -> Tuple[List[float], List[float], List[float], List[int]]:
         workers = _clone_workers(base_workers)
         replicator = TaskReplicator(
             context_dim=7,
@@ -657,8 +657,9 @@ def run_experiment() -> None:
         )
         if worker_timeline is not None:
             scheduler.enable_worker_dynamics = False
-        loss_c, cum_c, assign_counts = [], [], []
+        loss_c, cum_c, cum_exp_c, assign_counts = [], [], [], []
         cum = 0.0
+        cum_exp = 0.0
         np.random.seed(RANDOM_SEED)
         for s in range(steps):
             if worker_timeline is not None:
@@ -672,6 +673,8 @@ def run_experiment() -> None:
             loss_c.append(res["loss"])
             cum += res["realized_net"]
             cum_c.append(cum)
+            cum_exp += float(res.get("expected", 0.0))
+            cum_exp_c.append(cum_exp)
             assign_counts.append(int(res.get("assignment_count", len(res.get("sel_tasks", [])))))
             if s % 50 == 0:
                 try:
@@ -685,14 +688,14 @@ def run_experiment() -> None:
                     )
                 except Exception as _e:
                     print(f"[viz] failed to render partition at step {s}: {_e}")
-        return loss_c, cum_c, assign_counts
+        return loss_c, cum_c, cum_exp_c, assign_counts
 
     def run_with_selector(
         selector_factory,
         *,
         update_model: bool = False,
         use_oracle_eval: bool = True,
-    ) -> Tuple[List[float], List[float], List[int]]:
+    ) -> Tuple[List[float], List[float], List[float], List[int]]:
         """Run a baseline selector (e.g. RandomBaseline/GreedyBaseline)."""
         workers = _clone_workers(base_workers)
         replicator = TaskReplicator(
@@ -711,8 +714,9 @@ def run_experiment() -> None:
         if worker_timeline is not None:
             scheduler.enable_worker_dynamics = False
         selector = selector_factory(replicator)
-        loss_c, cum_c, assign_counts = [], [], []
+        loss_c, cum_c, cum_exp_c, assign_counts = [], [], [], []
         cum = 0.0
+        cum_exp = 0.0
         np.random.seed(RANDOM_SEED)
         eval_fn = scheduler.evaluate_reward_complex if use_oracle_eval else None
         for s in range(steps):
@@ -728,16 +732,18 @@ def run_experiment() -> None:
             loss_c.append(res["loss"])
             cum += res["realized_net"]
             cum_c.append(cum)
+            cum_exp += float(res.get("expected", 0.0))
+            cum_exp_c.append(cum_exp)
             assign_counts.append(int(res.get("assignment_count", len(res.get("sel_tasks", [])))))
-        return loss_c, cum_c, assign_counts
+        return loss_c, cum_c, cum_exp_c, assign_counts
 
     # Baselines
-    loss_r, cum_r, assign_r = run_with_selector(
+    loss_r, cum_r, cum_er, assign_r = run_with_selector(
         lambda _rep: RandomBaseline().select,
         update_model=False,
         use_oracle_eval=False,
     )
-    loss_g, cum_g, assign_g = run_with_selector(
+    loss_g, cum_g, cum_eg, assign_g = run_with_selector(
         lambda rep: GreedyBaseline(rep).select,
         update_model=True,
         use_oracle_eval=False,
@@ -765,8 +771,9 @@ def run_experiment() -> None:
         )
         if worker_timeline is not None:
             scheduler.enable_worker_dynamics = False
-        loss_c, cum_c, assign_counts = [], [], []
+        loss_c, cum_c, cum_exp_c, assign_counts = [], [], [], []
         cum = 0.0
+        cum_exp = 0.0
         np.random.seed(RANDOM_SEED)
         for s in range(steps):
             if worker_timeline is not None:
@@ -780,36 +787,15 @@ def run_experiment() -> None:
             loss_c.append(res["loss"])  # should be ~0 for oracle
             cum += res["realized_net"]
             cum_c.append(cum)
+            cum_exp += float(res.get("oracle", 0.0))
+            cum_exp_c.append(cum_exp)
             assign_counts.append(int(res.get("assignment_count", len(res.get("sel_tasks", [])))))
-        return loss_c, cum_c, assign_counts
+        return loss_c, cum_c, cum_exp_c, assign_counts
 
-    loss_o, cum_o, assign_o = run_original()
-    loss_orc, cum_orc, assign_orc = run_oracle()
+    loss_o, cum_o, cum_eo, assign_o = run_original()
+    loss_orc, cum_orc, cum_eorc, assign_orc = run_oracle()
 
-    if debug_counts:
-        assignment_counts = {
-            "Original": assign_o,
-            "Random": assign_r,
-            "Greedy": assign_g,
-            "Oracle": assign_orc,
-        }
-        base_counts = assignment_counts["Original"]
-        print("[assign-count] preview (first 10 steps):")
-        for name, seq in assignment_counts.items():
-            preview = seq[:10]
-            print(f"  {name:<8}: {preview}")
-        for name, seq in assignment_counts.items():
-            if name == "Original":
-                continue
-            if len(seq) != len(base_counts):
-                print(f"[assign-count] {name} length mismatch: {len(seq)} vs {len(base_counts)}")
-                continue
-            mismatches = [i for i, (a, b) in enumerate(zip(base_counts, seq)) if a != b]
-            if mismatches:
-                first = mismatches[0]
-                print(f"[assign-count] {name} differs at {len(mismatches)} steps; first mismatch step {first}: Original={base_counts[first]}, {name}={seq[first]}")
-            else:
-                print(f"[assign-count] {name} matches Original for all {len(base_counts)} steps")
+    # (debug prints removed)
 
     plt.figure(figsize=(9, 4))
     plt.plot(loss_o, label="Original", linewidth=1.0, alpha=0.7)
@@ -898,6 +884,40 @@ def run_experiment() -> None:
     plt.tight_layout()
     plt.savefig("output/compare_cum_reward.png", dpi=150)
     plt.close()
+
+    # New: Expected cumulative net reward (sum of expected net per step)
+    plt.figure(figsize=(9, 4))
+    # 使用不同的线型，避免重叠时“看成三条线”的错觉
+    plt.plot(cum_eo, label="Original", color='C0', linestyle='-', linewidth=2.0, alpha=0.95, zorder=3)
+    plt.plot(cum_er, label="Random",   color='C1', linestyle='--', linewidth=2.0, alpha=0.95, zorder=2)
+    plt.plot(cum_eg, label="Greedy",    color='C2', linestyle='-.', linewidth=2.0, alpha=0.95, zorder=4)
+    plt.plot(cum_eorc, label="Oracle",  color='C3', linestyle='-', linewidth=2.5, alpha=0.95, zorder=5)
+    plt.title("Expected Cumulative Net Reward")
+    plt.xlabel("Step")
+    plt.ylabel("Cumulative Expected Reward (sum(E[r]-cost))")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("output/compare_cum_expected.png", dpi=150)
+    plt.close()
+
+    # Print average expected net per selected assignment to help tune REPLICATION_COST
+    def _avg_expected(cum_e_seq, assign_seq):
+        total = float(cum_e_seq[-1]) if cum_e_seq else 0.0
+        nsel = int(sum(assign_seq)) if assign_seq else 0
+        avg = (total / nsel) if nsel > 0 else 0.0
+        return avg, total, nsel
+
+    avg_o, tot_o, n_o = _avg_expected(cum_eo, assign_o)
+    avg_r, tot_r, n_r = _avg_expected(cum_er, assign_r)
+    avg_g, tot_g, n_g = _avg_expected(cum_eg, assign_g)
+    avg_orc, tot_orc, n_orc = _avg_expected(cum_eorc, assign_orc)
+
+    print("[avg-expected-net] per selected assignment:")
+    print(f"  Original: {avg_o:.4f} (total={tot_o:.2f}, selected={n_o})")
+    print(f"  Random  : {avg_r:.4f} (total={tot_r:.2f}, selected={n_r})")
+    print(f"  Greedy  : {avg_g:.4f} (total={tot_g:.2f}, selected={n_g})")
+    print(f"  Oracle  : {avg_orc:.4f} (total={tot_orc:.2f}, selected={n_orc})")
     print("Saved loss (Original/Random) and cumulative reward (Original/Random/Oracle) plots.")
 
     return

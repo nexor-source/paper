@@ -680,11 +680,13 @@ def run_experiment() -> None:
                 try:
                     visualizer = PartitionVisualizer(replicator.partitions)
                     os.makedirs("output", exist_ok=True)
+                    part_dir = os.path.join("output", "partitions")
+                    os.makedirs(part_dir, exist_ok=True)
                     visualizer.plot_2d_partitions(
                         dim_x=0,
                         dim_y=1,
                         iteration=s,
-                        save_path=f"output/partition_{s}.png",
+                        save_path=os.path.join(part_dir, f"partition_{s}.png"),
                     )
                 except Exception as _e:
                     print(f"[viz] failed to render partition at step {s}: {_e}")

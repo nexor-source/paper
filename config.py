@@ -56,6 +56,13 @@ COMPARISON_BATCH_SIZE = 10
 ARRIVALS_PER_STEP = (6, 16)  # 每个时刻到达的任务数量的上下限
 ENABLE_WORKER_DYNAMICS_COMPARISON = True  # 由于所有baseline采用了相同的randomseed，所以随机结果是相同的
 
+# Assignment inspection configuration (visual spot checks)
+ASSIGNMENT_INSPECTION_COUNT = 5          # 0 ~ COMPARISON_STEPS-1 中随机抽查的 step 数量
+ASSIGNMENT_INSPECTION_SEED = 1234        # 抽查 step 使用的随机种子
+ASSIGNMENT_INSPECTION_DIR = "assignment_inspections"  # 输出目录（位于 output/ 下）
+# Optional: manually specify steps to inspect; set to None to fall back to random sampling
+ASSIGNMENT_INSPECTION_STEPS = None
+
 # 算法模拟worker的特征的时候混入了task的特征
 
 # 注释统一度量
@@ -67,4 +74,4 @@ ENABLE_WORKER_DYNAMICS_COMPARISON = True  # 由于所有baseline采用了相同�
 
 # scheduler.py 的 step 方法已经废弃了
 
-REPLICATION_COST = 0.1  # 默认的复制成本
+REPLICATION_COST = 0.4  # 默认的复制成本

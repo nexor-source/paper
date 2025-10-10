@@ -7,7 +7,7 @@ from matching_utils import run_hungarian_matching
 # 你之前定义的 ContextNormalizer, Assignment, TaskReplicator 类这里省略，假设已经实现并导入
 from normalizer import ContextNormalizer
 from task_replicator import Assignment, TaskReplicator
-from visualizer import PartitionVisualizer
+from visualizer import PartitionVisualizer, render_assignment_matrix
 from config import *
 
 # 全局记录每一步的 loss（oracle 与算法期望净收益之差的非负部分）
@@ -431,6 +431,8 @@ class Scheduler:
         selector: Callable[[List[Assignment], Callable[[Assignment], float]], List[Assignment]],
         update_model: bool = False,
         eval_net_fn: Optional[Callable[[np.ndarray], float]] = None,
+        *,
+        collect_details: bool = False,
     ) -> Dict[str, float]:
         """通用一步：自定义 selector 进行分配，可选更新模型，返回指标。"""
         # 1. 新任务 new_tasks 入队
@@ -479,7 +481,13 @@ class Scheduler:
             self.replicator.update_assignments_reward(selected_assignments, rewards)
 
         self.time += 1
-        return {
+        inspection_payload = None
+        if collect_details:
+            inspection_payload = {
+                "candidates": list(candidates),
+                "selected": list(selected_assignments),
+            }
+        result = {
             "loss": float(step_loss),
             "expected": float(alg_expected),
             "oracle": float(oracle_expected),
@@ -488,6 +496,9 @@ class Scheduler:
             "sel_tasks": sorted({int(a.task_id) for a in selected_assignments}),
             "assignment_count": len(selected_assignments),
         }
+        if inspection_payload is not None:
+            result["inspection"] = inspection_payload
+        return result
 
 def _clone_workers(workers: List["Worker"]) -> List["Worker"]:
     return [
@@ -620,6 +631,82 @@ def run_experiment() -> None:
     batch_size = int(globals().get("COMPARISON_BATCH_SIZE", 10))
     arrivals_min, arrivals_max = globals().get("ARRIVALS_PER_STEP", (6, 16))
 
+    inspection_steps_cfg = globals().get("ASSIGNMENT_INSPECTION_STEPS", None)
+    inspection_steps: List[int] = []
+    if inspection_steps_cfg is None:
+        inspection_count = int(globals().get("ASSIGNMENT_INSPECTION_COUNT", 0))
+        if inspection_count > 0 and steps > 0:
+            seed = int(globals().get("ASSIGNMENT_INSPECTION_SEED", RANDOM_SEED + 7))
+            rng_inspection = np.random.default_rng(seed)
+            sample_size = min(int(inspection_count), steps)
+            sampled = rng_inspection.choice(steps, size=sample_size, replace=False)
+            sampled_array = np.atleast_1d(sampled)
+            inspection_steps = sorted(int(x) for x in sampled_array.tolist())
+    else:
+        if isinstance(inspection_steps_cfg, (list, tuple, set)):
+            candidates = [int(v) for v in inspection_steps_cfg]
+        else:
+            candidates = [int(inspection_steps_cfg)]
+        inspection_steps = sorted({int(s) for s in candidates if 0 <= int(s) < steps})
+
+    inspection_dir_name = str(globals().get("ASSIGNMENT_INSPECTION_DIR", "assignment_inspections"))
+    inspection_dir = os.path.join("output", inspection_dir_name)
+    if inspection_steps:
+        print(f"[inspection] Capturing assignment grids at steps: {inspection_steps}")
+
+    def _maybe_render_inspection(
+        method_label: str,
+        step_idx: int,
+        scheduler_inst: "Scheduler",
+        predict_fn: Callable[[Assignment], float],
+        payload: Optional[Dict[str, List[Assignment]]],
+    ) -> None:
+        if not inspection_steps or payload is None:
+            return
+        candidates = payload.get("candidates", [])
+        if not candidates:
+            return
+        selected_assignments = payload.get("selected", [])
+        task_ids = sorted({int(a.task_id) for a in candidates})
+        worker_ids = sorted({int(a.worker_id) for a in candidates})
+
+        predicted_map: Dict[Tuple[int, int], float] = {}
+        for a in candidates:
+            key = (int(a.worker_id), int(a.task_id))
+            try:
+                predicted_map[key] = float(predict_fn(a))
+            except Exception as exc:
+                print(f"[inspection][{method_label}] failed to compute predicted net for {key}: {exc}")
+                predicted_map[key] = float("nan")
+
+        rc_val = float(scheduler_inst.replicator.replication_cost)
+        true_map: Dict[Tuple[int, int], float] = {}
+        for a in candidates:
+            key = (int(a.worker_id), int(a.task_id))
+            try:
+                expected = float(scheduler_inst.evaluate_reward_complex(a.context) - rc_val)
+            except Exception as exc:
+                print(f"[inspection][{method_label}] failed to compute true net for {key}: {exc}")
+                expected = float("nan")
+            true_map[key] = expected
+
+        selected_pairs = {(int(a.worker_id), int(a.task_id)) for a in selected_assignments}
+        safe_name = method_label.replace(" ", "_").lower()
+        save_path = os.path.join(inspection_dir, f"{safe_name}_step_{step_idx:04d}.png")
+        try:
+            render_assignment_matrix(
+                method_name=method_label,
+                step_index=step_idx,
+                task_ids=task_ids,
+                worker_ids=worker_ids,
+                predicted_net=predicted_map,
+                true_net=true_map,
+                selected_pairs=selected_pairs,
+                save_path=save_path,
+            )
+        except Exception as exc:
+            print(f"[inspection][{method_label}] failed to render matrix at step {step_idx}: {exc}")
+
     # 预生成任务流，三种算法共享
     task_stream: List[List[Task]] = []
     for _ in range(steps):
@@ -661,14 +748,21 @@ def run_experiment() -> None:
         cum = 0.0
         cum_exp = 0.0
         np.random.seed(RANDOM_SEED)
+
+        def predict_net(a: Assignment) -> float:
+            partition = replicator.root_partition.find_partition(a.context)
+            return float(partition.posterior_mean() - replicator.replication_cost)
+
         for s in range(steps):
             if worker_timeline is not None:
                 scheduler.workers = _clone_workers(worker_timeline[s])
+            collect_details = s in inspection_steps
             res = scheduler.step_with_selector(
                 task_stream[s],
                 batch_size,
                 lambda cands, _e: scheduler.replicator.select_assignments(cands, allow_unmatch=True),
                 update_model=True,
+                collect_details=collect_details,
             )
             loss_c.append(res["loss"])
             cum += res["realized_net"]
@@ -676,6 +770,9 @@ def run_experiment() -> None:
             cum_exp += float(res.get("expected", 0.0))
             cum_exp_c.append(cum_exp)
             assign_counts.append(int(res.get("assignment_count", len(res.get("sel_tasks", [])))))
+            if collect_details:
+                payload = res.get("inspection")
+                _maybe_render_inspection("Original", s, scheduler, predict_net, payload)
             if s % 50 == 0:
                 try:
                     visualizer = PartitionVisualizer(replicator.partitions)
@@ -695,8 +792,10 @@ def run_experiment() -> None:
     def run_with_selector(
         selector_factory,
         *,
+        method_label: str,
         update_model: bool = False,
         use_oracle_eval: bool = True,
+        predict_net_builder: Optional[Callable[["Scheduler", TaskReplicator], Callable[[Assignment], float]]] = None,
     ) -> Tuple[List[float], List[float], List[float], List[int]]:
         """Run a baseline selector (e.g. RandomBaseline/GreedyBaseline)."""
         workers = _clone_workers(base_workers)
@@ -721,15 +820,24 @@ def run_experiment() -> None:
         cum_exp = 0.0
         np.random.seed(RANDOM_SEED)
         eval_fn = scheduler.evaluate_reward_complex if use_oracle_eval else None
+
+        if predict_net_builder is not None:
+            predict_fn = predict_net_builder(scheduler, replicator)
+        else:
+            def predict_fn(a: Assignment) -> float:
+                return float(scheduler.evaluate_reward_complex(a.context) - scheduler.replicator.replication_cost)
+
         for s in range(steps):
             if worker_timeline is not None:
                 scheduler.workers = _clone_workers(worker_timeline[s])
+            collect_details = s in inspection_steps
             res = scheduler.step_with_selector(
                 task_stream[s],
                 batch_size,
                 selector,
                 update_model=update_model,
                 eval_net_fn=eval_fn,
+                collect_details=collect_details,
             )
             loss_c.append(res["loss"])
             cum += res["realized_net"]
@@ -737,18 +845,26 @@ def run_experiment() -> None:
             cum_exp += float(res.get("expected", 0.0))
             cum_exp_c.append(cum_exp)
             assign_counts.append(int(res.get("assignment_count", len(res.get("sel_tasks", [])))))
+            if collect_details:
+                payload = res.get("inspection")
+                _maybe_render_inspection(method_label, s, scheduler, predict_fn, payload)
         return loss_c, cum_c, cum_exp_c, assign_counts
 
     # Baselines
     loss_r, cum_r, cum_er, assign_r = run_with_selector(
         lambda _rep: RandomBaseline().select,
+        method_label="Random",
         update_model=False,
         use_oracle_eval=False,
     )
     loss_g, cum_g, cum_eg, assign_g = run_with_selector(
         lambda rep: GreedyBaseline(rep).select,
+        method_label="Greedy",
         update_model=True,
         use_oracle_eval=False,
+        predict_net_builder=lambda sched, rep: (
+            lambda a: float(rep.root_partition.find_partition(a.context).posterior_mean() - rep.replication_cost)
+        ),
     )
     # Oracle policy (for cumulative reward plot)
     def run_oracle() -> Tuple[List[float], List[float], List[int]]:
@@ -777,14 +893,20 @@ def run_experiment() -> None:
         cum = 0.0
         cum_exp = 0.0
         np.random.seed(RANDOM_SEED)
+
+        def predict_net(a: Assignment) -> float:
+            return float(scheduler.evaluate_reward_complex(a.context) - scheduler.replicator.replication_cost)
+
         for s in range(steps):
             if worker_timeline is not None:
                 scheduler.workers = _clone_workers(worker_timeline[s])
+            collect_details = s in inspection_steps
             res = scheduler.step_with_selector(
                 task_stream[s],
                 batch_size,
                 lambda cands, _e: scheduler._oracle_select_assignments(cands),
                 update_model=False,
+                collect_details=collect_details,
             )
             loss_c.append(res["loss"])  # should be ~0 for oracle
             cum += res["realized_net"]
@@ -792,6 +914,9 @@ def run_experiment() -> None:
             cum_exp += float(res.get("oracle", 0.0))
             cum_exp_c.append(cum_exp)
             assign_counts.append(int(res.get("assignment_count", len(res.get("sel_tasks", [])))))
+            if collect_details:
+                payload = res.get("inspection")
+                _maybe_render_inspection("Oracle", s, scheduler, predict_net, payload)
         return loss_c, cum_c, cum_exp_c, assign_counts
 
     loss_o, cum_o, cum_eo, assign_o = run_original()

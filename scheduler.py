@@ -750,8 +750,11 @@ def run_experiment() -> None:
         np.random.seed(RANDOM_SEED)
 
         def predict_net(a: Assignment) -> float:
-            partition = replicator.root_partition.find_partition(a.context)
-            return float(partition.posterior_mean() - replicator.replication_cost)
+            try:
+                return float(replicator.assignment_net(a, include_ucb=True))
+            except AttributeError:
+                partition = replicator.root_partition.find_partition(a.context)
+                return float(partition.posterior_mean() - replicator.replication_cost)
 
         for s in range(steps):
             if worker_timeline is not None:
@@ -863,7 +866,9 @@ def run_experiment() -> None:
         update_model=True,
         use_oracle_eval=False,
         predict_net_builder=lambda sched, rep: (
-            lambda a: float(rep.root_partition.find_partition(a.context).posterior_mean() - rep.replication_cost)
+            (lambda a: float(rep.assignment_net(a, include_ucb=True)))
+            if hasattr(rep, 'assignment_net')
+            else (lambda a: float(rep.root_partition.find_partition(a.context).posterior_mean() - rep.replication_cost))
         ),
     )
     # Oracle policy (for cumulative reward plot)

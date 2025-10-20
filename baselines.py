@@ -44,7 +44,10 @@ class GreedyBaseline:
 
     def _estimated_net(self, assignment: Assignment) -> float:
         partition = self.replicator.root_partition.find_partition(assignment.context)
-        return float(partition.posterior_mean() - self.replicator.replication_cost)
+        try:
+            return float(self.replicator.estimated_net(partition, include_ucb=True))
+        except AttributeError:
+            return float(partition.posterior_mean() - self.replicator.replication_cost)
 
     def select(self, candidates: List[Assignment], _eval_net: Callable[[Assignment], float]) -> List[Assignment]:
         if not candidates:

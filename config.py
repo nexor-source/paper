@@ -74,4 +74,12 @@ ASSIGNMENT_INSPECTION_STEPS = None
 
 # scheduler.py 的 step 方法已经废弃了
 
-REPLICATION_COST = 0.4  # 默认的复制成本
+REPLICATION_COST = 0.2  # 默认的复制成本
+
+# TaskReplicator exploration / UCB configuration
+REPLICATOR_USE_UCB = True            # 是否对 Original/Greedy 的估计加入 UCB 探索项
+REPLICATOR_UCB_COEF = 1.5            # UCB 系数 c：越大越激进探索
+REPLICATOR_UCB_MIN_PULLS = 1         # 分母里加的平滑项，防止除 0
+REPLICATOR_PRIOR_MEAN = 0.6          # 初始化/划分后子区域的乐观先验均值
+REPLICATOR_PRIOR_WEIGHT = 2.0        # 乐观先验的“伪样本”权重
+

@@ -1,3 +1,4 @@
+import math
 import numpy as np
 from typing import List, Tuple, Optional
 from matching_utils import run_hungarian_matching
@@ -21,10 +22,18 @@ class ContextSpacePartition:
         self.estimated_quality = 0.0  # 该区域内任务副本的平均完成质量估计
         self.children = None    # 子划分列表，未细分时为None
 
-        # 新增：层级先验（“父经验”）。注意：prior_weight 不计入细分阈值
-        self.prior_mean = 0.5                 # 缺省先验均值（对二元奖励可设 0.5）
-        self.prior_weight = 0.0               # 先验“伪样本权重”
-        self.sum_reward = 0.0                 # 该 partition 所有样本带来的reward总和
+        # Hierarchical prior (inherit from parent); prior_weight does not affect split threshold
+        try:
+            _prior_mean_default = float(globals().get('REPLICATOR_PRIOR_MEAN', 0.5))
+        except Exception:
+            _prior_mean_default = 0.5
+        try:
+            _prior_weight_default = float(globals().get('REPLICATOR_PRIOR_WEIGHT', 0.0))
+        except Exception:
+            _prior_weight_default = 0.0
+        self.prior_mean = _prior_mean_default                 # default prior mean for Bernoulli rewards
+        self.prior_weight = max(0.0, _prior_weight_default)   # pseudo-count weight
+        self.sum_reward = 0.0                 # cumulative reward stored in this partition
     
     def posterior_mean(self) -> float:
         """融合先验与真实样本的估计质量（后验均值）
@@ -126,15 +135,29 @@ class ContextSpacePartition:
         # 创建子划分对象列表
         self.children = [ContextSpacePartition(b, self.depth + 1) for b in new_bounds_list]
 
-        # —— 关键：将父分区“后验均值”作为子分区“先验均值”，并给予弱化先验权重 ——
+        # Seed children with the parent posterior plus optional global prior hints
         parent_post = self.posterior_mean()
-        total_prior = LAMBDA_PRIOR * min(self.sample_count, PRIOR_CAP)  # 控制强度与上限
+        total_prior = LAMBDA_PRIOR * min(self.sample_count, PRIOR_CAP)  # inherited-strength cap
         n_child = max(1, len(self.children))
         per_child_prior = total_prior / n_child if total_prior > 0 else 0.0
 
+        try:
+            base_prior_mean = float(globals().get('REPLICATOR_PRIOR_MEAN', parent_post))
+        except Exception:
+            base_prior_mean = parent_post
+        try:
+            base_prior_weight = float(globals().get('REPLICATOR_PRIOR_WEIGHT', 0.0))
+        except Exception:
+            base_prior_weight = 0.0
         for child in self.children:
             child.prior_mean = parent_post
             child.prior_weight = per_child_prior
+            if base_prior_weight > 0.0:
+                combined_weight = child.prior_weight + base_prior_weight
+                if combined_weight > 0.0:
+                    child.prior_mean = (child.prior_mean * child.prior_weight + base_prior_mean * base_prior_weight) / combined_weight
+                    child.prior_weight = combined_weight
+            child.prior_weight = max(0.0, child.prior_weight)
             child.update_reward(0, True)
             # 重要：不继承 sample_count / sum_reward，避免“过度自信”
             # child.sample_count = 0
@@ -201,6 +224,20 @@ class TaskReplicator:
         self.root_partition = ContextSpacePartition(bounds=[(0,1)]*context_dim)
         self.partitions = [self.root_partition]
         self.partition_split_threshold = partition_split_threshold
+        try:
+            self.use_ucb = bool(globals().get('REPLICATOR_USE_UCB', False))
+        except Exception:
+            self.use_ucb = False
+        try:
+            self.ucb_coef = float(globals().get('REPLICATOR_UCB_COEF', 0.0))
+        except Exception:
+            self.ucb_coef = 0.0
+        try:
+            self.ucb_min_pulls = max(1.0, float(globals().get('REPLICATOR_UCB_MIN_PULLS', 1)))
+        except Exception:
+            self.ucb_min_pulls = 1.0
+        self.use_ucb = bool(self.use_ucb and self.ucb_coef > 0.0)
+        self.total_updates = 0
 
         # 调试用的计数器
         self._run_counter = 0
@@ -269,6 +306,24 @@ class TaskReplicator:
         print("=== End ===\n")
         return
 
+    def estimated_net(self, partition: ContextSpacePartition, include_ucb: bool = True) -> float:
+        mean = float(partition.posterior_mean())
+        if include_ucb and self.use_ucb:
+            pulls = float(partition.sample_count + partition.prior_weight)
+            pulls = max(pulls, float(self.ucb_min_pulls))
+            total = max(self.total_updates, 1)
+            bonus = 0.0
+            try:
+                bonus = self.ucb_coef * math.sqrt(max(0.0, math.log(total + 1.0) / pulls))
+            except Exception:
+                bonus = 0.0
+            mean = min(1.0, mean + bonus)
+        return float(mean - self.replication_cost)
+
+    def assignment_net(self, assignment: 'Assignment', include_ucb: bool = True) -> float:
+        partition = self.root_partition.find_partition(assignment.context)
+        return self.estimated_net(partition, include_ucb=include_ucb)
+
     # 覆盖式统一接口：允许通过参数控制是否可不匹配
     def select_assignments(self, candidate_assignments: List[Assignment], allow_unmatch: bool = True):
         """选择工-任务匹配（允许通过参数控制是否可不匹配）。
@@ -290,8 +345,8 @@ class TaskReplicator:
         pair2a = {}
         for a in candidate_assignments:
             i, j = task_idx[a.task_id], worker_idx[a.worker_id]
-            p_mean = self.root_partition.find_partition(a.context).posterior_mean()
-            net = float(p_mean - self.replication_cost)
+            partition = self.root_partition.find_partition(a.context)
+            net = self.estimated_net(partition, include_ucb=True)
             profits[i, j] = net
             pair2a[(a.task_id, a.worker_id)] = a
 
@@ -356,6 +411,7 @@ class TaskReplicator:
             p = self.root_partition.find_partition(a.context)
             reward = rewards.get(a, 0)
             p.update_reward(reward)
+            self.total_updates += 1
             # 样本数达到阈值后进行二分细分（受最大层级限制）
             if p.sample_count >= self.partition_split_threshold + p.depth:
                 # 若设置了最大层级限制，且当前层级已达到或超过上限，则不再细分

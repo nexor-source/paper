@@ -174,14 +174,6 @@ def greedy_select(profits: np.ndarray) -> Tuple[float, List[Tuple[int, int, floa
     return total, picks
 
 
-def oracle_select(profits: np.ndarray) -> Tuple[float, List[Tuple[int, int, float]]]:
-    """
-    Oracle knows the true net reward. Here profits already represent that,
-    so oracle equals Hungarian. We keep it separated to emphasise the baseline.
-    """
-    return hungarian_select(profits)
-
-
 def plot_heatmap(step_idx: int,
                  profits: np.ndarray,
                  picks_o: List[Tuple[int, int, float]],
@@ -233,28 +225,63 @@ def plot_totals(step_totals: Dict[str, List[float]],
     colors = {
         "Original": "C0",
         "Greedy": "C2",
-        "Oracle": "C3",
     }
 
-    # Step rewards
+    # determine marker spacing to avoid “sugar-coated hawthorn” clutter
+    def _markevery(series: List[float]) -> int:
+        n = max(1, len(series))
+        # show at most about 12 markers per line
+        return max(1, n // 12)
+
+    # Step rewards (use line + light markers; highlight gap)
+    bar_width = 0.35
+    offset = {"Original": -bar_width / 2, "Greedy": bar_width / 2}
     for label, series in step_totals.items():
-        axes[0].plot(steps, series, marker="o", label=label, color=colors.get(label, None))
-    axes[0].set_title("Step Expected Reward")
+        axes[0].bar(
+            steps + offset[label],
+            series,
+            width=bar_width,
+            label=label,
+            color=colors.get(label, None),
+            alpha=0.65,
+        )
+    axes[0].set_title("Per-Step Expected Reward")
     axes[0].set_xlabel("Step")
     axes[0].set_ylabel("Reward")
-    axes[0].grid(True, alpha=0.3)
+    tick_positions = np.linspace(0, len(steps) - 1, num=6)
+    tick_positions = np.unique(np.round(tick_positions).astype(int))
+    axes[0].set_xticks(tick_positions)
+    # zoom y-range around data
+    step_min = min(min(series) for series in step_totals.values())
+    step_max = max(max(series) for series in step_totals.values())
+    margin = max(0.5, 0.05 * (step_max - step_min))
+    axes[0].set_ylim(step_min - margin, step_max + margin)
+    axes[0].grid(True, axis="y", alpha=0.3)
     axes[0].legend()
 
     # Cumulative rewards
     for label, series in cumulative.items():
-        axes[1].plot(steps, series, marker="o", label=label, color=colors.get(label, None))
+        axes[1].plot(
+            steps,
+            series,
+            label=label,
+            color=colors.get(label, None),
+            linewidth=1.8,
+            marker="o",
+            markersize=4,
+            markevery=_markevery(series),
+        )
     axes[1].set_title("Cumulative Expected Reward")
     axes[1].set_xlabel("Step")
     axes[1].set_ylabel("Cumulative reward")
+    cum_min = min(min(series) for series in cumulative.values())
+    cum_max = max(max(series) for series in cumulative.values())
+    cum_margin = max(5.0, 0.03 * (cum_max - cum_min))
+    axes[1].set_ylim(cum_min - cum_margin, cum_max + cum_margin)
     axes[1].grid(True, alpha=0.3)
     axes[1].legend()
 
-    fig.suptitle("Challenge Scenario: Original vs Greedy vs Oracle", fontsize=14, fontweight="bold")
+    fig.suptitle("Challenge Scenario – Original vs Greedy", fontsize=14, fontweight="bold")
     fig.savefig(OUTPUT_DIR / "challenge_totals.png", dpi=150)
     plt.close(fig)
 
@@ -267,9 +294,9 @@ def run_challenge(
     workers = build_workers(workers_per_group=workers_per_group)
     print(f"[info] workers: {len(workers)} (per speciality {workers_per_group})")
 
-    step_totals = {"Original": [], "Greedy": [], "Oracle": []}
-    cumulative = {"Original": [], "Greedy": [], "Oracle": []}
-    cum_vals = {"Original": 0.0, "Greedy": 0.0, "Oracle": 0.0}
+    step_totals = {"Original": [], "Greedy": []}
+    cumulative = {"Original": [], "Greedy": []}
+    cum_vals = {"Original": 0.0, "Greedy": 0.0}
 
     for step_idx in range(steps):
         tasks = build_tasks(step_idx, num_tasks=num_tasks)
@@ -277,21 +304,17 @@ def run_challenge(
 
         total_o, picks_o = hungarian_select(profits)
         total_g, picks_g = greedy_select(profits)
-        total_orc, picks_orc = oracle_select(profits)
 
         step_totals["Original"].append(total_o)
         step_totals["Greedy"].append(total_g)
-        step_totals["Oracle"].append(total_orc)
 
         cum_vals["Original"] += total_o
         cum_vals["Greedy"] += total_g
-        cum_vals["Oracle"] += total_orc
 
         cumulative["Original"].append(cum_vals["Original"])
         cumulative["Greedy"].append(cum_vals["Greedy"])
-        cumulative["Oracle"].append(cum_vals["Oracle"])
 
-        print(f"Step {step_idx:03d} | Original={total_o:.3f}, Greedy={total_g:.3f}, Oracle={total_orc:.3f}")
+        print(f"Step {step_idx:03d} | Original={total_o:.3f}, Greedy={total_g:.3f}")
 
         if step_idx < 10 or step_idx % max(1, steps // 10) == 0:
             plot_heatmap(step_idx, profits, picks_o, picks_g, workers, tasks)
@@ -299,7 +322,7 @@ def run_challenge(
     plot_totals(step_totals, cumulative)
 
     print("\n=== Challenge Summary ===")
-    for label in ["Original", "Greedy", "Oracle"]:
+    for label in ["Original", "Greedy"]:
         print(f"{label:>8s} cumulative reward: {cum_vals[label]:.3f}")
 
     diff = cum_vals["Original"] - cum_vals["Greedy"]

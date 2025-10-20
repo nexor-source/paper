@@ -432,6 +432,7 @@ class Scheduler:
         update_model: bool = False,
         eval_net_fn: Optional[Callable[[np.ndarray], float]] = None,
         *,
+        predict_net_fn: Optional[Callable[[Assignment], float]] = None,
         collect_details: bool = False,
     ) -> Dict[str, float]:
         """通用一步：自定义 selector 进行分配，可选更新模型，返回指标。"""
@@ -467,6 +468,41 @@ class Scheduler:
         oracle_expected = self._expected_total_reward(oracle_assignments)
         step_loss = max(0.0, oracle_expected - alg_expected)
 
+        pred_sel_sum = 0.0
+        pred_sel_abs_sum = 0.0
+        pred_sel_count = 0
+        pred_all_sum = 0.0
+        pred_all_abs_sum = 0.0
+        pred_all_count = 0
+        if predict_net_fn is not None and candidates:
+            diff_map: Dict[Assignment, float] = {}
+            for assignment in candidates:
+                try:
+                    pred_val = float(predict_net_fn(assignment))
+                except Exception:
+                    pred_val = float("nan")
+                true_val = float(reward_fn(assignment.context) - rc)
+                if np.isfinite(pred_val):
+                    diff = pred_val - true_val
+                    diff_map[assignment] = diff
+                    pred_all_sum += diff
+                    pred_all_abs_sum += abs(diff)
+                    pred_all_count += 1
+            if selected_assignments:
+                for assignment in selected_assignments:
+                    diff = diff_map.get(assignment)
+                    if diff is None:
+                        try:
+                            pred_val = float(predict_net_fn(assignment))
+                        except Exception:
+                            continue
+                        if not np.isfinite(pred_val):
+                            continue
+                        diff = pred_val - float(reward_fn(assignment.context) - rc)
+                    pred_sel_sum += diff
+                    pred_sel_abs_sum += abs(diff)
+                    pred_sel_count += 1
+
         # 5. 模拟执行与奖励
         realized_net = 0.0
         rewards: Dict[Assignment, float] = {}
@@ -496,6 +532,18 @@ class Scheduler:
             "sel_tasks": sorted({int(a.task_id) for a in selected_assignments}),
             "assignment_count": len(selected_assignments),
         }
+        if pred_sel_count > 0:
+            result["pred_error_sum"] = float(pred_sel_sum)
+            result["pred_error_abs_sum"] = float(pred_sel_abs_sum)
+            result["pred_error_count"] = float(pred_sel_count)
+            result["pred_error_mean"] = float(pred_sel_sum / pred_sel_count)
+            result["pred_error_abs_mean"] = float(pred_sel_abs_sum / pred_sel_count)
+        if pred_all_count > 0:
+            result["pred_error_all_sum"] = float(pred_all_sum)
+            result["pred_error_all_abs_sum"] = float(pred_all_abs_sum)
+            result["pred_error_all_count"] = float(pred_all_count)
+            result["pred_error_all_mean"] = float(pred_all_sum / pred_all_count)
+            result["pred_error_all_abs_mean"] = float(pred_all_abs_sum / pred_all_count)
         if inspection_payload is not None:
             result["inspection"] = inspection_payload
         return result
@@ -727,7 +775,7 @@ def run_experiment() -> None:
     from baselines import RandomBaseline, GreedyBaseline
     import matplotlib.pyplot as plt
 
-    def run_original() -> Tuple[List[float], List[float], List[float], List[int]]:
+    def run_original() -> Tuple[List[float], List[float], List[float], List[int], List[float], List[float]]:
         workers = _clone_workers(base_workers)
         replicator = TaskReplicator(
             context_dim=7,
@@ -745,13 +793,21 @@ def run_experiment() -> None:
         if worker_timeline is not None:
             scheduler.enable_worker_dynamics = False
         loss_c, cum_c, cum_exp_c, assign_counts = [], [], [], []
+        pred_error_mean_series: List[float] = []
+        pred_error_abs_series: List[float] = []
         cum = 0.0
         cum_exp = 0.0
+        pred_error_sel_sum = 0.0
+        pred_error_sel_abs_sum = 0.0
+        pred_error_sel_count = 0.0
+        pred_error_all_sum = 0.0
+        pred_error_all_abs_sum = 0.0
+        pred_error_all_count = 0.0
         np.random.seed(RANDOM_SEED)
 
         def predict_net(a: Assignment) -> float:
             try:
-                return float(replicator.assignment_net(a, include_ucb=True))
+                return float(replicator.assignment_net(a, include_ucb=False))
             except AttributeError:
                 partition = replicator.root_partition.find_partition(a.context)
                 return float(partition.posterior_mean() - replicator.replication_cost)
@@ -765,6 +821,7 @@ def run_experiment() -> None:
                 batch_size,
                 lambda cands, _e: scheduler.replicator.select_assignments(cands, allow_unmatch=True),
                 update_model=True,
+                predict_net_fn=predict_net,
                 collect_details=collect_details,
             )
             loss_c.append(res["loss"])
@@ -773,6 +830,16 @@ def run_experiment() -> None:
             cum_exp += float(res.get("expected", 0.0))
             cum_exp_c.append(cum_exp)
             assign_counts.append(int(res.get("assignment_count", len(res.get("sel_tasks", [])))))
+            pred_error_mean_series.append(float(res.get("pred_error_all_mean", res.get("pred_error_mean", np.nan))))
+            pred_error_abs_series.append(float(res.get("pred_error_all_abs_mean", res.get("pred_error_abs_mean", np.nan))))
+            if "pred_error_count" in res:
+                pred_error_sel_sum += float(res.get("pred_error_sum", 0.0))
+                pred_error_sel_abs_sum += float(res.get("pred_error_abs_sum", 0.0))
+                pred_error_sel_count += float(res.get("pred_error_count", 0.0))
+            if "pred_error_all_count" in res:
+                pred_error_all_sum += float(res.get("pred_error_all_sum", 0.0))
+                pred_error_all_abs_sum += float(res.get("pred_error_all_abs_sum", 0.0))
+                pred_error_all_count += float(res.get("pred_error_all_count", 0.0))
             if collect_details:
                 payload = res.get("inspection")
                 _maybe_render_inspection("Original", s, scheduler, predict_net, payload)
@@ -790,7 +857,23 @@ def run_experiment() -> None:
                     )
                 except Exception as _e:
                     print(f"[viz] failed to render partition at step {s}: {_e}")
-        return loss_c, cum_c, cum_exp_c, assign_counts
+        if pred_error_all_count > 0:
+            avg_err_all = float(pred_error_all_sum / pred_error_all_count)
+            avg_abs_err_all = float(pred_error_all_abs_sum / pred_error_all_count)
+            print("[prediction-bias][Original][all] mean={:.4f}, mean_abs={:.4f}, samples={}".format(
+                avg_err_all,
+                avg_abs_err_all,
+                int(pred_error_all_count),
+            ))
+        if pred_error_sel_count > 0:
+            avg_err_sel = float(pred_error_sel_sum / pred_error_sel_count)
+            avg_abs_err_sel = float(pred_error_sel_abs_sum / pred_error_sel_count)
+            print("[prediction-bias][Original][selected] mean={:.4f}, mean_abs={:.4f}, samples={}".format(
+                avg_err_sel,
+                avg_abs_err_sel,
+                int(pred_error_sel_count),
+            ))
+        return loss_c, cum_c, cum_exp_c, assign_counts, pred_error_mean_series, pred_error_abs_series
 
     def run_with_selector(
         selector_factory,
@@ -799,7 +882,7 @@ def run_experiment() -> None:
         update_model: bool = False,
         use_oracle_eval: bool = True,
         predict_net_builder: Optional[Callable[["Scheduler", TaskReplicator], Callable[[Assignment], float]]] = None,
-    ) -> Tuple[List[float], List[float], List[float], List[int]]:
+    ) -> Tuple[List[float], List[float], List[float], List[int], List[float], List[float]]:
         """Run a baseline selector (e.g. RandomBaseline/GreedyBaseline)."""
         workers = _clone_workers(base_workers)
         replicator = TaskReplicator(
@@ -819,11 +902,20 @@ def run_experiment() -> None:
             scheduler.enable_worker_dynamics = False
         selector = selector_factory(replicator)
         loss_c, cum_c, cum_exp_c, assign_counts = [], [], [], []
+        pred_error_mean_series: List[float] = []
+        pred_error_abs_series: List[float] = []
         cum = 0.0
         cum_exp = 0.0
+        pred_error_sel_sum = 0.0
+        pred_error_sel_abs_sum = 0.0
+        pred_error_sel_count = 0.0
+        pred_error_all_sum = 0.0
+        pred_error_all_abs_sum = 0.0
+        pred_error_all_count = 0.0
         np.random.seed(RANDOM_SEED)
         eval_fn = scheduler.evaluate_reward_complex if use_oracle_eval else None
 
+        track_pred_error = predict_net_builder is not None
         if predict_net_builder is not None:
             predict_fn = predict_net_builder(scheduler, replicator)
         else:
@@ -840,6 +932,7 @@ def run_experiment() -> None:
                 selector,
                 update_model=update_model,
                 eval_net_fn=eval_fn,
+                predict_net_fn=predict_fn if track_pred_error else None,
                 collect_details=collect_details,
             )
             loss_c.append(res["loss"])
@@ -848,25 +941,53 @@ def run_experiment() -> None:
             cum_exp += float(res.get("expected", 0.0))
             cum_exp_c.append(cum_exp)
             assign_counts.append(int(res.get("assignment_count", len(res.get("sel_tasks", [])))))
+            pred_error_mean_series.append(float(res.get("pred_error_all_mean", res.get("pred_error_mean", np.nan))))
+            pred_error_abs_series.append(float(res.get("pred_error_all_abs_mean", res.get("pred_error_abs_mean", np.nan))))
+            if track_pred_error and "pred_error_count" in res:
+                pred_error_sel_sum += float(res.get("pred_error_sum", 0.0))
+                pred_error_sel_abs_sum += float(res.get("pred_error_abs_sum", 0.0))
+                pred_error_sel_count += float(res.get("pred_error_count", 0.0))
+            if track_pred_error and "pred_error_all_count" in res:
+                pred_error_all_sum += float(res.get("pred_error_all_sum", 0.0))
+                pred_error_all_abs_sum += float(res.get("pred_error_all_abs_sum", 0.0))
+                pred_error_all_count += float(res.get("pred_error_all_count", 0.0))
             if collect_details:
                 payload = res.get("inspection")
                 _maybe_render_inspection(method_label, s, scheduler, predict_fn, payload)
-        return loss_c, cum_c, cum_exp_c, assign_counts
+        if track_pred_error and pred_error_all_count > 0:
+            avg_err_all = float(pred_error_all_sum / pred_error_all_count)
+            avg_abs_err_all = float(pred_error_all_abs_sum / pred_error_all_count)
+            print("[prediction-bias][{}][all] mean={:.4f}, mean_abs={:.4f}, samples={}".format(
+                method_label,
+                avg_err_all,
+                avg_abs_err_all,
+                int(pred_error_all_count),
+            ))
+        if track_pred_error and pred_error_sel_count > 0:
+            avg_err_sel = float(pred_error_sel_sum / pred_error_sel_count)
+            avg_abs_err_sel = float(pred_error_sel_abs_sum / pred_error_sel_count)
+            print("[prediction-bias][{}][selected] mean={:.4f}, mean_abs={:.4f}, samples={}".format(
+                method_label,
+                avg_err_sel,
+                avg_abs_err_sel,
+                int(pred_error_sel_count),
+            ))
+        return loss_c, cum_c, cum_exp_c, assign_counts, pred_error_mean_series, pred_error_abs_series
 
     # Baselines
-    loss_r, cum_r, cum_er, assign_r = run_with_selector(
+    loss_r, cum_r, cum_er, assign_r, _pred_err_r, _pred_err_abs_r = run_with_selector(
         lambda _rep: RandomBaseline().select,
         method_label="Random",
         update_model=False,
         use_oracle_eval=False,
     )
-    loss_g, cum_g, cum_eg, assign_g = run_with_selector(
+    loss_g, cum_g, cum_eg, assign_g, pred_err_g, pred_err_abs_g = run_with_selector(
         lambda rep: GreedyBaseline(rep).select,
         method_label="Greedy",
         update_model=True,
         use_oracle_eval=False,
         predict_net_builder=lambda sched, rep: (
-            (lambda a: float(rep.assignment_net(a, include_ucb=True)))
+            (lambda a: float(rep.assignment_net(a, include_ucb=False)))
             if hasattr(rep, 'assignment_net')
             else (lambda a: float(rep.root_partition.find_partition(a.context).posterior_mean() - rep.replication_cost))
         ),
@@ -924,7 +1045,7 @@ def run_experiment() -> None:
                 _maybe_render_inspection("Oracle", s, scheduler, predict_net, payload)
         return loss_c, cum_c, cum_exp_c, assign_counts
 
-    loss_o, cum_o, cum_eo, assign_o = run_original()
+    loss_o, cum_o, cum_eo, assign_o, pred_err_o, pred_err_abs_o = run_original()
     loss_orc, cum_orc, cum_eorc, assign_orc = run_oracle()
 
     # (debug prints removed)
@@ -1001,6 +1122,38 @@ def run_experiment() -> None:
     plt.legend()
     plt.tight_layout()
     plt.savefig("output/compare_loss_smooth.png", dpi=150)
+    plt.close()
+
+    err_o = np.asarray(pred_err_o, dtype=float)
+    err_g = np.asarray(pred_err_g, dtype=float)
+    err_abs_o = np.asarray(pred_err_abs_o, dtype=float)
+    err_abs_g = np.asarray(pred_err_abs_g, dtype=float)
+    steps_axis = np.arange(len(err_o))
+    steps_axis_g = np.arange(len(err_g))
+
+    plt.figure(figsize=(9, 4))
+    plt.plot(steps_axis, err_o, label="Original", color='C0', linewidth=1.0, alpha=0.85)
+    plt.plot(steps_axis_g, err_g, label="Greedy", color='C2', linewidth=1.0, alpha=0.85)
+    plt.axhline(0.0, color='k', linestyle='--', linewidth=0.8, alpha=0.4)
+    plt.title("Prediction Bias (Signed Error on Selected Assignments)")
+    plt.xlabel("Step")
+    plt.ylabel("Predicted net - true net")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("output/pred_error_mean.png", dpi=150)
+    plt.close()
+
+    plt.figure(figsize=(9, 4))
+    plt.plot(steps_axis, err_abs_o, label="Original", color='C0', linewidth=1.0, alpha=0.85)
+    plt.plot(steps_axis_g, err_abs_g, label="Greedy", color='C2', linewidth=1.0, alpha=0.85)
+    plt.title("Prediction Error Magnitude on Selected Assignments")
+    plt.xlabel("Step")
+    plt.ylabel("|Predicted net - true net|")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("output/pred_error_abs.png", dpi=150)
     plt.close()
 
     plt.figure(figsize=(9, 4))

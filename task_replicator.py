@@ -237,6 +237,16 @@ class TaskReplicator:
         except Exception:
             self.ucb_min_pulls = 1.0
         self.use_ucb = bool(self.use_ucb and self.ucb_coef > 0.0)
+        try:
+            self.min_samples_before_split = int(globals().get('PARTITION_MIN_SAMPLES', self.partition_split_threshold))
+        except Exception:
+            self.min_samples_before_split = self.partition_split_threshold
+        self.min_samples_before_split = max(1, self.min_samples_before_split)
+        try:
+            self.variance_split_threshold = float(globals().get('PARTITION_VARIANCE_THRESHOLD', 0.02))
+        except Exception:
+            self.variance_split_threshold = 0.02
+        self.variance_split_threshold = max(0.0, self.variance_split_threshold)
         self.total_updates = 0
 
         # 调试用的计数器
@@ -323,6 +333,40 @@ class TaskReplicator:
     def assignment_net(self, assignment: 'Assignment', include_ucb: bool = True) -> float:
         partition = self.root_partition.find_partition(assignment.context)
         return self.estimated_net(partition, include_ucb=include_ucb)
+
+    def _posterior_variance(self, partition: ContextSpacePartition) -> float:
+        """Compute Beta posterior variance for Bernoulli rewards with hierarchical prior."""
+        total_pulls = partition.prior_weight + partition.sample_count
+        # If no data at all, return high variance (force potential split once samples accumulate)
+        if total_pulls <= 0:
+            return 1.0
+        alpha = partition.prior_mean * partition.prior_weight + partition.sum_reward
+        beta_param = (1.0 - partition.prior_mean) * partition.prior_weight + partition.sample_count - partition.sum_reward
+        # guard against numerical issues
+        alpha = max(alpha, 1e-9)
+        beta_param = max(beta_param, 1e-9)
+        denom = (alpha + beta_param) ** 2 * (alpha + beta_param + 1.0)
+        if denom <= 0.0:
+            return 0.0
+        variance = (alpha * beta_param) / denom
+        return float(variance)
+
+    def _should_split(self, partition: ContextSpacePartition) -> bool:
+        """Decide whether to subdivide a partition based on variance & sample count."""
+        if partition.children is not None:
+            return False
+        if self.max_partition_depth is not None and partition.depth >= self.max_partition_depth:
+            return False
+
+        min_required = max(self.min_samples_before_split, self.partition_split_threshold + partition.depth)
+        if partition.sample_count < min_required:
+            return False
+
+        variance = self._posterior_variance(partition)
+        if variance <= self.variance_split_threshold:
+            return False
+
+        return True
 
     # 覆盖式统一接口：允许通过参数控制是否可不匹配
     def select_assignments(self, candidate_assignments: List[Assignment], allow_unmatch: bool = True):
@@ -413,10 +457,7 @@ class TaskReplicator:
             p.update_reward(reward)
             self.total_updates += 1
             # 样本数达到阈值后进行二分细分（受最大层级限制）
-            if p.sample_count >= self.partition_split_threshold + p.depth:
-                # 若设置了最大层级限制，且当前层级已达到或超过上限，则不再细分
-                if self.max_partition_depth is not None and p.depth >= self.max_partition_depth:
-                    continue
+            if self._should_split(p):
                 p.subdivide()
                 if p in self.partitions:
                     self.partitions.remove(p)

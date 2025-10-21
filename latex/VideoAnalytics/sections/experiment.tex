@@ -99,6 +99,15 @@ Figure~\ref{fig:cum} further shows that Ours accumulates the highest net reward 
 \label{fig:cum}
 \end{figure}
 
+\paragraph{Partition refinement.} To visualise the evolution of the adaptive context tree, Figure~\ref{fig:partitions} shows the partition boundaries in the two-dimensional (speed, bandwidth) space at several training steps. The partition is initially coarse; as more assignments are observed the tree refines around frequently visited regions and eventually concentrates on the high-speed/high-bandwidth quadrant where many profitable matches occur.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.95\linewidth]{VideoAnalytics/fig/partition 可视化.png}
+\caption{Evolution of the adaptive partition over two-dimensional contexts. Boundaries densify in frequently visited regions and converge to the high-speed/high-bandwidth quadrant.}
+\label{fig:partitions}
+\end{figure}
+
 \paragraph{Challenge scenario.}\label{sec:challenge}
 We further construct a conflict-heavy benchmark where different task clusters strongly favor different worker specialties. In this regime, Greedy often allocates the same “universal” workers to multiple clusters and leaves other tasks under-served, while Ours uses the Hungarian solver to coordinate assignments globally. Figure~\ref{fig:challenge_totals} shows that Ours accumulates a larger reward margin over Greedy in this setting.
 

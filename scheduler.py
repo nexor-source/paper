@@ -1206,6 +1206,28 @@ def run_experiment() -> None:
     plt.savefig("output/pred_error_abs.png", dpi=150)
     plt.close()
 
+    # Smoothed absolute prediction error with the same rolling window stats as loss
+    x_abs_o, mean_abs_o, lo_abs_o, hi_abs_o = _prep(err_abs_o)
+    x_abs_g, mean_abs_g, lo_abs_g, hi_abs_g = _prep(err_abs_g)
+
+    plt.figure(figsize=(9, 4))
+    if lo_abs_o is not None and hi_abs_o is not None and len(lo_abs_o) > 0:
+        plt.fill_between(x_abs_o, lo_abs_o, hi_abs_o, color='C0', alpha=0.12)
+    plt.plot(x_abs_o, mean_abs_o, label="Ours (mean)", color='C0', linewidth=2.0)
+
+    if lo_abs_g is not None and hi_abs_g is not None and len(lo_abs_g) > 0:
+        plt.fill_between(x_abs_g, lo_abs_g, hi_abs_g, color='C2', alpha=0.12)
+    plt.plot(x_abs_g, mean_abs_g, label="Greedy (mean)", color='C2', linewidth=2.0)
+
+    plt.title(f"|Prediction Error| (rolling mean, window={smooth_win})")
+    plt.xlabel("Step (offset by window)")
+    plt.ylabel("|Predicted net - true net|")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("output/pred_error_abs_smooth.png", dpi=150)
+    plt.close()
+
     plt.figure(figsize=(9, 4))
     plt.plot(cum_o, label="Ours")
     plt.plot(cum_r, label="Random")

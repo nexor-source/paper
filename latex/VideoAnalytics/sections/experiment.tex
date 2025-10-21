@@ -1,0 +1,96 @@
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Setup}
+We implement a custom simulation framework in Python to model the interactions among video analysis tasks, worker nodes, and the platform. All experiments are conducted on a local desktop equipped with an Intel Core i5-13400F CPU (10 cores, 16 threads, base frequency 2.50GHz, up to 4.0GHz). GPU acceleration is not used; all computations are performed on a single-threaded CPU setup.
+
+We evaluate the proposed method (denoted as \textbf{Original}) in a synthetic scheduling environment and compare it with a random baseline (\textbf{Random}). Additionally, we include an \textbf{Oracle} policy that uses ground-truth success probabilities as an upper bound reference. To ensure fairness, we pre-generate a fixed task arrival sequence that is shared across all algorithms. Success or failure of each assignment is sampled from a Bernoulli distribution with a fixed random seed (42) to ensure reproducibility.
+
+Task-to-worker matching is performed using the Hungarian algorithm. All experiments are conducted under the default configuration provided in the source code.
+
+\subsection{Workload and Environment}
+The system consists of a worker pool (initially 10 workers), a task queue, and a context normalization module. At each time step, a number of new tasks arrive, triggering one round of task assignment and execution.
+
+\textbf{Task arrival:} At each time step, a random number of tasks arrive, drawn uniformly from $U[6,16)$. Each task is characterized by attributes such as type, data size, and deadline. We simulate $T=300$ time steps in total (COMPARISON\_STEPS=300).
+
+\textbf{Worker features:} Each worker is described by attributes such as driving speed and bandwidth, normalized into $[0,1]$ based on predefined ranges. In this experiment, we focus on two-dimensional contexts (\texttt{context\_dim=2}): speed and bandwidth.
+
+\textbf{Worker dynamics:} To ensure a fair comparison, we disable worker dynamics by default (\texttt{ENABLE\_WORKER\_DYNAMICS\_COMPARISON=False}), meaning the worker pool remains static and consistent across algorithms.
+
+The normalization ranges for each feature are defined in \texttt{WORKER\_FEATURE\_VALUES\_RANGE}, e.g., driving speed $(0, 40)$ m/s and bandwidth $(0, 1000)$ Mbps.
+
+\subsection{Methods}
+
+\textbf{Original (proposed):} The core algorithm is an online replicate-and-match strategy based on adaptive context partitioning. When a partition cell accumulates enough samples, it is refined by splitting along the longest dimension. The quality estimate combines prior beliefs and posterior observations. During assignment, the estimated net reward (estimated success probability minus replication cost) is converted into a cost matrix, and the Hungarian algorithm is used to compute one-to-one matching. Only pairs with positive net reward are retained.
+
+\textbf{Random (baseline):} From all candidate worker-task pairs, pairs with non-positive net reward are first filtered out. The remaining ones are randomly shuffled and greedily selected (without conflicts) until no further assignments can be made.
+
+\textbf{Oracle (upper bound):} Based on ground-truth success probabilities $p(\cdot)$, a net reward matrix is constructed using $p - \text{cost}$, and the optimal one-to-one assignment is computed using the Hungarian algorithm. The oracle is only used as a reference in the cumulative net reward curve; it does not participate in learning or in the regret/loss plot.
+
+\subsection{Success Probability and Reward}
+Given a normalized context vector $x \in [0,1]^d$, the success probability $p(x)$ is simulated using a smooth, nonlinear function that includes:
+
+- Diminishing marginal returns (via square root) and pairwise interactions (via geometric mean) for \textbf{positive features} such as driving speed, bandwidth, and processor performance;
+- Convex penalties for \textbf{negative features} such as distance, data size, and weather;
+- A soft gating effect modeled by a sigmoid function to simulate bottleneck behavior.
+
+The execution reward is drawn from a Bernoulli distribution $\text{Bernoulli}(p(x))$ per assignment. Each assignment incurs a unit replication cost of $c=0.1$, and the net reward is defined as reward minus cost.
+
+\subsection{Metrics}
+
+\textbf{Loss (regret) per step:} Taking the oracle’s expected net reward as the upper bound, the step loss is defined as
+\[
+\text{loss}_t = \max\left(0, \ \mathbb{E}[\text{net}]_{\text{oracle}} - \mathbb{E}[\text{net}]_{\text{alg}}\right).
+\]
+
+\textbf{Cumulative Net Reward:} The total net reward is computed as
+\[
+\sum_{t} (\text{reward}_t - c),
+\]
+where $\text{reward}_t$ is the sampled binary success feedback drawn from $p(x)$.
+
+To ensure fairness, all algorithms run independently on the same task stream, and their performance curves are plotted accordingly.
+
+\subsection{Hyperparameters}
+
+The default hyperparameters used in the experiments are:
+
+\begin{itemize}
+    \item Replication cost: $c = 0.1$ (\texttt{replication\_cost})
+    \item Maximum replicas per task: $B = 1$ (\texttt{budget})
+    \item Partition split threshold: $\tau = 10$ (\texttt{partition\_split\_threshold})
+    \item Maximum partition depth: $D = 8$ (\texttt{MAX\_PARTITION\_DEPTH})
+    \item Split strategy: longest dimension (\texttt{PARTITION\_SPLIT\_STRATEGY=longest})
+    \item Batch size: 10 (\texttt{COMPARISON\_BATCH\_SIZE})
+    \item Total steps: 300 (\texttt{COMPARISON\_STEPS})
+    \item Random seed: 42 (\texttt{RANDOM\_SEED})
+\end{itemize}
+
+\subsection{Results}
+
+Figure~\ref{fig:loss} shows the per-step loss (gap from oracle net reward). We observe that the proposed method significantly outperforms the Random baseline, indicating better selection and estimation of high-reward worker-task pairs.
+
+% This should be, but not for now
+% Figure~\ref{fig:cum} presents the cumulative net reward curves. The proposed method maintains consistently higher net reward than Random and approaches the Oracle upper bound over time. The remaining gap is expected due to exploration needs and sampling variance. These results validate the effectiveness of our adaptive context partitioning and refinement mechanism in a dynamic environment.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.95\linewidth]{VideoAnalytics/fig/compare_loss.png}
+\caption{Per-step loss (lower is better). Original vs. Random.}
+\label{fig:loss}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.95\linewidth]{VideoAnalytics/fig/compare_cum_reward.png}
+\caption{Cumulative net reward. Original vs. Random vs. Oracle.}
+\label{fig:cum}
+\end{figure}
+
+\subsection{Ablations and Reproducibility}
+
+\textbf{Worker Dynamics.} The framework allows toggling worker arrival and ability drift via \texttt{ENABLE\_WORKER\_DYNAMICS\_COMPARISON}. We disable this feature by default to reduce confounding factors and ensure fair comparison across methods.
+
+\textbf{Task Stream and Randomness.} The task stream is pre-generated and shared across all methods. Randomness in reward sampling is controlled using a fixed global seed.
+
+\textbf{Reproducibility.} The experiments can be reproduced by running the main script \texttt{scheduler.py} with \texttt{RUN\_COMPARISON=True}. Parameters such as step count, batch size, and arrival range can be adjusted in \texttt{config.py}.

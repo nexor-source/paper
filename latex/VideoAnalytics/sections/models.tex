@@ -1,0 +1,282 @@
+\section{System Model}
+In this paper, we consider an edge-assisted crowdsourcing system for video analytics tasks in vehicular networks. {\color{blue}We present modeling of tasks, workers and the platform in the system as follows. Then, we formulate the problem studied in this paper.}
+
+
+\subsection{Task modeling}
+% In the system, tasks are divided into multiple time slots. Each time slot \( t \) is assigned to a specific worker or a set of workers, denoted as \( \mathcal{W}^t = \{ w_1^t, w_2^t, \dots, w_n^t \} \), where each \( w_i^t \) represents a worker assigned to the task in time slot \( t \). Each worker is responsible for completing the assigned task, such as video analysis or data collection, within the corresponding time slot. 
+{\color{blue}We consider video analytics tasks that arrive in our system over time. For convenience, we assume the system is time-slotted, which means the system operates slot-by-slot.} 
+
+
+
+The concept of a slot helps to structure the time-based allocation of tasks and ensures that the workload is distributed efficiently among workers. A slot represents a discrete unit of time during which the workers in \( \mathcal{W}^t \) must perform the assigned tasks and upload their results. However, not all workers in \( \mathcal{W}^t \) are necessarily assigned a task. Each time slot \( t \) may only have a subset of workers assigned tasks, depending on the system's task allocation strategy.
+
+Furthermore, each time slot \( t \) contains \( M \) incoming tasks, denoted as \( \mathcal{T}^t = \{ T_1^t, T_2^t, \dots, T_M^t \} \), where each \( T_i^t \) represents a task arriving at time slot \( t \). These tasks could be video analysis tasks, data collection requests, or other computational tasks. The tasks in \( \mathcal{T}^t \) are to be allocated to the workers in \( \mathcal{W}^t \), where some tasks may not require a worker to be assigned if no suitable worker is available.
+
+To model the assignment of tasks to workers, we introduce a binary variable \( x_{i,j}^t \), which is defined as follows:
+\[
+x_{i,j}^t = 
+\begin{cases} 
+1, & \text{if worker } w_i^t \text{ is assigned to task } T_j^t \text{ at time slot } t, \\
+0, & \text{otherwise}.
+\end{cases}
+\]
+The binary variable \( x_{i,j}^t \) indicates whether worker \( w_i^t \) is assigned to complete task \( T_j^t \) in time slot \( t \). If \( x_{i,j}^t = 1 \), worker \( w_i^t \) will perform task \( T_j^t \); otherwise, the worker will not be assigned that task during that time slot. This modeling allows for flexible allocation of tasks to workers, where some tasks may remain unassigned if no suitable worker is available, or if the system decides not to allocate them during that specific time slot.
+
+\subsection{Worker modeling}
+In the edge-assisted crowdsourcing system for video analysis tasks, we define a worker as a device, a vehicle, or any node with processing power. Their task is to receive tasks assigned by the system, collect video data, analyze video content, and upload results. These workers are equipped with various energy-consuming components, which include transmission and processing units. 
+
+\subsubsection{Context Vector Definition and Normalization}
+In our system, task and worker characteristics are modeled as a context vector $\mathbf{z}_i^t \in \mathbb{R}^d$, where each dimension represents a relevant factor influencing task execution. These factors include:
+\begin{itemize}
+    \item \textbf{Driving speed}: The speed at which the worker (e.g., vehicle) is traveling, which can affect the task execution time and data transmission. The unit is meters per second (m/s).
+    \item \textbf{Bandwidth}: The communication bandwidth available to the worker, impacting the data transfer rate for task execution. The unit is megabits per second (Mbps).
+    \item \textbf{Processor performance}: The computational power available to the worker, influencing the speed and efficiency of task processing. This is often measured in gigahertz (GHz) or FLOPS (floating-point operations per second).
+    \item \textbf{Physical location (distance)}: The distance from the worker to the nearest task upload location, affecting latency and energy consumption. The unit is meters (m).
+    \item \textbf{Task type}: The type of task being assigned, which determines its computational complexity and resource requirements. It is represented as a categorical variable or indexed accordingly.
+    \item \textbf{Data size}: The size of the data that needs to be processed, which affects both processing time and energy consumption. The unit is megabytes (MB) or gigabytes (GB).
+    \item \textbf{Weather}: Environmental conditions such as weather, which can be directly observed by the platform and may affect task performance, such as data transmission reliability or worker mobility. This is represented as a categorical or numerical value.
+\end{itemize}
+
+All variables in the context vector $\mathbf{z}_i^t$ are normalized to a predefined range to fit the context space for partitioning. This ensures consistency in the dimensions and allows the context space to be adaptively partitioned into cells. Specifically, the variables are normalized as follows:
+\begin{itemize}
+    \item \textbf{Driving speed, bandwidth, and processor performance} are normalized to fit within a fixed range based on typical system specifications.
+    \item \textbf{Physical location (distance)} is normalized based on the maximum distance observed in the system.
+    \item \textbf{Task type} is normalized into a categorical index.
+    \item \textbf{Data size} is normalized based on the maximum size encountered in the dataset.
+    \item \textbf{Weather} is normalized based on predefined weather categories or numeric scales.
+\end{itemize}
+
+The context space $\mathcal{Z}$ is adaptively partitioned into cells, each representing a subset of arms, where each arm corresponds to a worker-task combination with similar performance characteristics. Initially, the entire context space $\mathcal{Z}$ is treated as a single coarse region, providing a general approximation of all arms. As the system progresses and receives feedback from task outcomes, these regions are incrementally refined to capture areas with higher performance accuracy.
+
+The adaptive refinement of the context space allows the system to focus on promising areas, accelerating the identification of high-reward arms and ensuring faster convergence to optimal or near-optimal solutions.
+
+To capture the energy consumption of a worker, we divide it into two primary components: transmission energy consumption and video analysis energy consumption.
+
+\subsubsection{Transmission Energy Consumption}
+The transmission energy consumption refers to the energy spent by the worker on downloading video data from the edge server or transmitting video data to the edge server or other network nodes. This energy is primarily determined by the data size, transmission distance, and communication protocol used. The transmission energy for a worker \(w_i^t\) on task \(T_j^t\), denoted as \( E_{\text{trans}, i,j}^t \), can be expressed as:
+\[
+E_{\text{trans}, i,j}^t =  \alpha_{\text{trans}} \cdot D_j^t \cdot \left( \frac{d_i}{d_0} \right)^\beta \cdot x_{i,j}^t
+\]
+where:
+\begin{itemize}
+    \item \( D_j^t \) is the amount of data transmitted for task \( j \) during time slot \( t \), which can be computed as:
+    \item \( d_i \) is the transmission distance from worker \( w_i^t \) to the receiving node,
+    \item \( d_0 \) is a reference distance (1 meter in our experiments),
+    \item \( \alpha_{\text{trans}} \) is a constant that represents the energy per unit of data transmitted at the reference distance,
+    \item \( \beta \) is the path loss exponent, which varies depending on the communication environment (e.g., urban, rural).
+    \item \(x_{i,j}^t\) is whether task \(j\) is allocated to worker \(i\) in time slot t
+\end{itemize}
+To model \( D_j^t \), we consider two key factors: frame rate and resolution. Specifically, the amount of data transmitted for task \( j \) during time slot \(t\) can be modeled as:
+\[
+D_j^t = f_j \cdot R_j 
+\]
+where:
+\begin{itemize}
+    \item \( f_j \) is the frame rate of video for task \( j \) (frames per second),
+    \item \( R_j \) is the resolution of each frame for task \( j \) (in bits per pixel),
+\end{itemize}
+
+The energy consumption increases with the amount of data to be transmitted and the distance to the receiving node, which is crucial for efficient task allocation in terms of energy.
+
+\subsubsection{Video Analysis Energy Consumption}
+The energy consumption for video analysis refers to the energy expended by the worker to process video data, including tasks such as video decoding, feature extraction, object detection, and other computational operations. The energy consumed by worker \( w_i^t \) for analyzing the video data during time slot \( t \), denoted as \( E_{\text{analyze}, i}^t \), can be expressed as:
+
+\[
+E_{\text{analyze}, i, j}^t = \alpha_{\text{analyze}} \cdot P_{\text{total}, i}^t \cdot x_{i,j}^t
+\]
+
+where:
+\begin{itemize}
+    \item \( P_{\text{total}, i}^t \) is the total power consumed by worker \( w_i^t \) while analyzing video data in time slot \( t \),
+    \item \( \alpha_{\text{analyze}} \) is a constant representing the energy consumption per unit of processing power per unit of time,
+    \item \(x_{i,j}^t\) is whether task \(j\) is allocated to worker \(i\) in time slot \(t\).
+\end{itemize}
+
+To model \( P_{\text{total}, i}^t \), we consider two key factors: task type and frame rate. Specifically, the total power consumed by worker \( w_i^t \) can be modeled as:
+
+\[
+P_{\text{total}, i}^t = \alpha_{\text{task}, i} \cdot P_{\text{base}, i}^t \cdot \frac{f_i^t}{f_0}
+\]
+
+where:
+\begin{itemize}
+    \item \( P_{\text{base}, i}^t \) is the baseline power consumed by worker \( w_i^t \) for performing basic video analysis tasks (e.g., decoding), 
+    \item \( f_i^t \) is the frame rate of the video being analyzed during time slot \( t \),
+    \item \( f_0 \) is a reference frame rate (30 fps in our experiments), 
+    \item \( \alpha_{\text{task}, i} \) is a constant specific to the task type, representing the scaling factor based on the complexity of the task (e.g., object detection or action recognition).
+\end{itemize}
+
+This energy consumption model can be used to estimate the expected power usage based on worker's context before the task execution.
+
+
+\subsubsection{Total Energy Consumption}
+The total energy consumed by worker \( w_i^t \) during time slot \( t \) can be computed by summing the transmission and analysis energy consumption:
+\[
+E_{i}^t = \sum _{j=1} ^M (E_{\text{trans}, i,j}^t + E_{\text{analyze}, i,j}^t)
+\]
+where:
+\begin{itemize}
+    \item \( E_{\text{analyze}, i, j}^t \) denotes the estimated computational energy required by worker \( w_i^t \) to execute the video analysis operations associated with task \( T_j^t \),
+    \item \( E_{\text{trans}, i, j}^t \) denotes the estimated communication energy required by worker \( w_i^t \) to upload or download video data associated with task \( T_j^t \),
+\end{itemize}
+
+
+\subsection{Platform modeling}
+The crowdsourcing platform acts as an intermediary that assigns video analysis tasks to workers and receives rewards from task requesters. The platform's profit during time slot \( t \), denoted as \( \Pi^t \), is determined by the revenue obtained from completed tasks and the costs paid to workers.
+
+\subsubsection{Platform Revenue}
+The platform earns revenue for each successfully completed task. The revenue obtained from task \( j \) during time slot \( t \), denoted as \( R_j^t \), can be formulated as:
+\[
+R_j^t = p_j \cdot Q_j^t
+\]
+where:
+\begin{itemize}
+    \item \( p_j \) is the payment offered by the requester for unit quality of task \( j \),
+    \item \( Q_j^t \) is the quality of the completed task \( j \) during time slot \( t \), which depends on the accuracy, latency, and completeness of the video analysis task.
+\end{itemize}
+
+%这一段是否需要在cost中加入对质量的权衡（已删除）
+\subsubsection{Worker Reward}
+The platform needs to compensate workers for their computational resources and energy consumption. The reward paid to worker \( w_i^t \) for completing tasks during time slot \( t \), denoted as \( C_i^t \), can be modeled as:
+\[
+C_i^t =   \lambda E_i^t
+\]
+where:
+\begin{itemize}
+    \item \( \lambda \) is the compensation rate per unit energy consumed.
+\end{itemize}
+
+\subsubsection{Platform Profit}
+The platform's total profit during time slot \( t \), denoted as \( \Pi^t \), can be expressed as:
+\[
+\Pi^t = \sum_{j=1}^{M} R_j^t - \sum_{i=1}^{N} C_i^t
+\]
+where:
+\begin{itemize}
+    \item \( M \) is the total number of tasks,
+    \item \( N \) is the total number of workers.
+\end{itemize}
+
+% 连续性假设
+% semi-bandit 假设
+% arm独立性假设
+% 每个时刻都会到来新的arm，volatile假设
+% bounded 奖励
+
+\subsection{Assumptions}
+
+To support the design and theoretical analysis of the proposed learning-based task assignment algorithm, we make the following assumptions:
+
+\begin{itemize}
+    \item \textbf{(A1) Lipschitz continuity of the expected reward:}  
+    The expected platform reward function \( Q(\mathbf{z}_i^t) \) is assumed to be Lipschitz continuous over the context space \( \mathcal{Z} \). That is, there exists a constant \( L > 0 \) such that for any two context vectors \( \mathbf{z}_i^t, \mathbf{z}_j^t \in \mathcal{Z} \), the following holds:
+    \[
+    \left| Q(\mathbf{z}_i^t) - Q(\mathbf{z}_j^t) \right| \leq L \| \mathbf{z}_i^t - \mathbf{z}_j^t \|_2.
+    \]
+    This assumption ensures that similar arms yield similar expected rewards, enabling effective generalization and partitioning of the context space.
+
+
+    \item \textbf{(A2) Conditional independence of task outcomes:}  
+    Given the context vectors \( \mathbf{z}_i^t \), the outcomes (i.e., task quality or reward) of different arms are conditionally independent. 
+    Formally,
+    
+    \[
+    \mathbb{P}(Q(\mathbf{z}_1^t), Q(\mathbf{z}_2^t), \dots, Q(\mathbf{z}_N^t) \mid \mathbf{z}_1^t, \dots, \mathbf{z}_N^t) = \prod_{i=1}^{N} \mathbb{P}(Q(\mathbf{z}_i^t) \mid \mathbf{z}_i^t).
+    \]
+
+    \item \textbf{(A3) Semi-bandit feedback:}  
+    After assigning tasks, the platform receives individual feedback on the task quality \( Q(\mathbf{z}_i^t) \) for each selected arm. The observed reward is assumed to depend solely on the corresponding context vector \( \mathbf{z}_i^t \).
+
+
+    \item \textbf{(A4) Bounded reward and cost:}  
+    The expected platform reward \( Q(\mathbf{z}_i^t) \) and the corresponding worker cost \( C_i^t \) are both assumed to be bounded. Specifically,
+    \[
+    Q(\mathbf{z}_i^t) \in [0, Q_{\max}], \quad C_i^t \in [0, C_{\max}],
+    \]
+    where \( Q_{\max} \) and \( C_{\max} \) are known positive constants. This assumption guarantees that the resulting profit is well-defined and avoids unbounded variance in the learning process.
+
+    \item \textbf{(A5) Dynamic worker availability and feasibility:}  
+The set of available workers varies across time slots in a dynamic and uncertain manner. At each time slot \( t \), we assume that the number of available workers \( N \) exceeds the number of tasks \( M \), i.e., \( N > M \). This ensures the feasibility of task assignment under system constraints and allows one-to-one matching between tasks and workers.
+\end{itemize}
+
+
+\subsection{Problem formulation}
+The goal of the crowdsourcing platform is to maximize its profit by optimally assigning video analysis tasks to workers while ensuring task quality, managing energy consumption, and satisfying system constraints.
+
+The optimization problem is formulated as follows:
+
+\begin{align}
+    \max_{\mathbf{x}} \quad & \Pi^t = \sum_{j=1}^{M} R_j^t - \sum_{i=1}^{N} C_i^t  \tag{1} \\
+    \text{s.t.} \quad 
+    & \sum_{j=1}^{M} x_{i,j}^t \leq 1, \quad \forall i, t  \tag{2} \\
+    & \sum_{i=1}^{N} x_{i,j}^t \geq 1, \quad \forall j, t  \tag{3} \\
+    & x_{i,j}^t \in \{0,1\}, \quad \forall i,j,t  \tag{4} \\
+    & E_{\text{analyze}, i}^t + E_{\text{trans}, i}^t \leq E_i^{\max}, \quad \forall i, t  \tag{5} \\
+    & \sum_{t=1}^{T_j^{\max}} \sum_{i=1}^{N} x_{i,j}^t \cdot Q_{i,j}^t \geq Q_j^{\text{req}}, \quad \forall j  \tag{6} \\
+    & \sum_{i=1}^{N} \sum_{j=1}^{M} x_{i,j}^t \cdot D_j^t \leq B^{\max}, \quad \forall t  \tag{7}
+\end{align}
+
+\subsubsection{Explanation of Constraints}
+\begin{itemize}
+    \item \textbf{Objective function (1)}: Maximizes the platform’s profit \( \Pi^t \), defined as the total revenue \( R_j^t \) from assigned tasks minus the total cost \( C_i^t \) of worker payments.
+    \item \textbf{Constraint (2)}: Ensures that each worker \( w_i \) can handle at most one task at any given time \( t \).
+    \item \textbf{Constraint (3)}: Ensures that each task \( j \) is assigned to at least one worker.
+    \item \textbf{Constraint (4)}: Defines \( x_{i,j}^t \) as a binary decision variable, indicating whether worker \( i \) is assigned to task \( j \) at time \( t \).
+    \item \textbf{Constraint (5)}: Ensures that the total energy consumed by a worker \( i \) (including computing and transmission energy) does not exceed its available energy \( E_i^{\max} \).
+    \item \textbf{Constraint (6)}: Ensures that the total accumulated task quality \( Q_{i,j}^t \) over the allowed time slots meets the minimum required quality \( Q_j^{\text{req}} \).
+    \item \textbf{Constraint (7)}: Ensures that the total data transmission does not exceed the maximum available bandwidth \( B^{\max} \).
+\end{itemize}
+
+The problem formulation ensures that the system efficiently allocates tasks while considering energy consumption, bandwidth limitations.
+
+% reward 和 cost在上下文空间的方法中并没有详细地进行描述，可能是因为当时地状态被直接映射到上下文空间中，方法根据context space对应的 profit 函数 （进而可以直接得到最终选取的结果），所以reward和cost对应的计算被囊括到了context space的细分过程中。【那reward和cost的具体公式还有必要在models中去具体说明吗】
+
+\noindent
+\textbf{Notation.} To facilitate understanding of the proposed system and algorithmic framework, we summarize the key mathematical symbols and their meanings in Table~\ref{tab:notations}. These notations are used throughout the paper in both the system modeling and the method design sections.
+
+% 表格现在太宽了放不下
+\begin{table*}[t]
+\centering
+\scriptsize
+\caption{Notations Table}
+\label{tab:notations}
+\begin{tabular}{llll}
+\toprule
+\textbf{Symbol} & \textbf{Description} & \textbf{Unit} & \textbf{Category} \\
+\midrule
+$t$ & Time slot index & - & System Model \\
+$T$ & Total number of time slots & - & System Model \\
+$N$ & Number of available workers at time $t$ & - & Task/Worker Model \\
+$M$ & Number of incoming tasks at time $t$ & - & Task Model \\
+$w_i^t$ & Worker $i$ at time $t$ & - & Worker Model \\
+$T_j^t$ & Task $j$ at time $t$ & - & Task Model \\
+$x_{i,j}^t$ & Assignment variable (1 if $w_i^t$ is assigned to $T_j^t$) & Binary & Task Assignment \\
+$\mathbf{z}_{i,j}^t$ & Context vector for arm $(i,j)$ & $\mathbb{R}^d$ & Context Model \\
+$\mathcal{Z}$ & Context space & - & Context Model \\
+$\mathcal{C}_i^t$ & Context cell containing $\mathbf{z}_{i,j}^t$ & - & Context Model \\
+$\hat{Q}(\mathbf{z}_{i,j}^t)$ & Estimated task quality of $\mathbf{z}_{i,j}^t$ & - & Context Model \\
+$Q(\mathbf{z}_{i,j}^t)$ & True reward of $\mathbf{z}_{i,j}^t$ & - & Reward Model \\
+$c^{t}(\mathcal{C}_i^t)$ & Confidence term for cell $\mathcal{C}_i^t$ & - & Bandit Model \\
+$\Delta(\mathcal{C}_i^t)$ & Hierarchical correction term for cell $\mathcal{C}_i^t$ & - & Bandit Model \\
+$S(\mathcal{C}_i^t)$ & Number of times cell $\mathcal{C}_i^t$ has been split & - & Bandit Model \\
+$p_j$ & Payment per unit quality for task $j$ & - & Platform Model \\
+$C_{i,j}^t$ & Estimated energy cost for $w_i^t$ to perform $T_j^t$ & - & Platform Model \\
+$\hat{\Pi}_{i,j}^t$ & Estimated profit of assigning $w_i^t$ to $T_j^t$ & - & Profit Model \\
+$E_{\text{trans},i,j}^t$ & Transmission energy of worker $i$ for task $j$ at time $t$ & Joules & Energy Model \\
+$E_{\text{analyze},i,j}^t$ & Analysis energy of worker $i$ for task $j$ at time $t$ & Joules & Energy Model \\
+$E_i^t$ & Total energy consumption of worker $i$ at time $t$ & Joules & Energy Model \\
+$C_i^t$ & Reward (cost) paid to worker $i$ for energy consumption & - & Platform Cost \\
+$R_j^t$ & Platform revenue from task $j$ at time $t$ & - & Platform Revenue \\
+$\Pi^t$ & Platform profit at time $t$ & - & Platform Profit \\
+$D_j^t$ & Amount of video data for task $j$ & MB or GB & Task Model \\
+$f_j$ & Frame rate for task $j$ & fps & Task Model \\
+$R_j$ & Resolution per frame for task $j$ & bits/pixel & Task Model \\
+$d_i$ & Distance from worker $i$ to data upload location & m & Worker Model \\
+$\alpha_{\text{trans}}$ & Transmission energy coefficient & - & Energy Model \\
+$\alpha_{\text{analyze}}$ & Analysis energy coefficient & - & Energy Model \\
+$P_{\text{base}, i}^t$ & Baseline power of worker $i$ during analysis & W & Energy Model \\
+$P_{\text{total}, i}^t$ & Total power of worker $i$ for analysis & W & Energy Model \\
+$N_{cell}^t$& Number of partitions (cells) in context space at time $t$ & - & Complexity Analysis \\
+\bottomrule
+\end{tabular}
+\end{table*}

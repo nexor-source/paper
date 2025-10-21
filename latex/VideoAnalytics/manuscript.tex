@@ -1,0 +1,132 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+% The preceding line is only needed to identify funding in the first footnote. If that is unneeded, please comment it out.
+\usepackage{amsthm}
+\usepackage{caption}
+\usepackage{url}
+\usepackage{amssymb}
+\usepackage{graphicx}
+%\usepackage{floatrow}
+\usepackage{tabularx}
+\usepackage{float}
+\usepackage{amsmath}
+\usepackage{mathtools}
+\usepackage{latexsym}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage[ruled]{algorithm}
+\usepackage{cite}
+\usepackage{algorithmic}
+\usepackage{xspace}
+\usepackage{epstopdf}
+\usepackage[caption=false]{subfig}
+\usepackage[T1]{fontenc}
+%\usepackage{authblk}
+\usepackage{url}
+\usepackage{rotating}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{color}
+\usepackage{colortbl}
+\usepackage{comment}
+\usepackage{mathrsfs}
+\usepackage{makecell}
+
+\usepackage{multicol}
+\usepackage{multirow}
+\usepackage{makecell}
+\usepackage{bm}
+\usepackage{paralist}
+\usepackage{enumitem}
+\usepackage{eqparbox} 
+\usepackage{booktabs}
+
+% \usepackage{hyperref}
+
+
+\usepackage{fancyhdr} % 添加页眉页脚
+
+\usepackage{subfigure}
+% \usepackage{ulem}
+
+% \usepackage{accents}
+% \usepackage{statex}
+% \makeatletter
+% \def\wideubar{\underaccent{{\cc@style\underline{\mskip10mu}}}}
+% \def\Wideubar{\underaccent{{\cc@style\underline{\mskip8mu}}}}
+% \makeatother
+
+% \makeatletter
+% \newcommand\dlmu[2][0.5cm]{\hskip1pt\underline{\hb@xt@ #1{\hss#2\hss}}\hskip3pt}
+% \makeatother
+\usepackage{accents}
+\newcommand{\ubar}[1]{\underaccent{\bar}{#1}}
+
+% \renewcommand{\algorithmiccomment}[1]{\hfill\eqparbox{COMMENT}{\# #1}} 
+\renewcommand{\algorithmiccomment}[1]{\eqparbox{COMMENT}{\rhd #1}} 
+
+\newcommand{\ie}{\textit{i.e.}\xspace}
+\newcommand{\etal}{\textit{et al.}\xspace}
+\newcommand{\eg}{\textit{e.g.}\xspace}
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{proposition}{Proposition}
+\newtheorem{definition}{Definition}
+\newtheorem{assump}{Assumption}
+\newtheorem{observe}{Observation}
+\DeclareMathOperator*{\argmax}{arg\,max}
+% \def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+%     T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+% \title{Multi-objective-aware Data Collection in UAV Crowdsensing: A Multi-objective Bandit Approach}
+\title{Video Analytics + crowdsourcing + vehicular networks}
+
+
+\maketitle
+
+\thispagestyle{fancy} % IEEE模板在\maketitle后会自动声明\thispagestyle{plain}，
+                            % 导致第一页什么都没有。所以得把plain更改为fancy
+\lhead{} % 页眉左，需要东西的话就在{}内添加
+\chead{} % 页眉中
+\rhead{} % 页眉右
+\lfoot{} % 页眉左
+\cfoot{} % 页眉中
+\rfoot{\thepage} %页眉右，\thepage 表示当前页码
+\renewcommand{\headrulewidth}{0pt} %改为0pt即可去掉页眉下面的横线
+\renewcommand{\footrulewidth}{0pt} %改为0pt即可去掉页脚上面的横线
+\pagestyle{fancy}
+\rfoot{\thepage}
+
+
+\begin{abstract}
+Abstract goes here.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Key word1, Key word2, Key word3, Key word4
+\end{IEEEkeywords}
+
+\input{./sections/intro.tex}
+
+
+
+\input{./sections/related.tex}
+
+\input{./sections/models}
+\input{}
+
+
+
+\input{./sections/method.tex}
+
+\input{./sections/experiment.tex}
+
+\input{./sections/conclusion.tex}
+
+
+\bibliographystyle{IEEEtran}
+\bibliography{ref}
+
+\end{document}

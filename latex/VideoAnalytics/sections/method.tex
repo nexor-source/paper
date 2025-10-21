@@ -1,0 +1,267 @@
+
+
+\section{Our Method}
+
+To address the challenges of dynamic worker availability and energy-aware task assignment in vehicular edge-assisted crowdsourcing, we design an adaptive learning-based task allocation strategy. This method dynamically estimates the performance of workers based on their contextual attributes and historical outcomes, while optimizing the assignment of tasks to minimize system-wide energy consumption and ensure successful task execution.
+
+\subsection{Adaptive Contextual Space Modeling}
+
+\subsubsection{Contextual Bandit Base Settings}
+In our system, each available worker at time slot $t$ is viewed as an \textit{arm candidate}, represented by a context vector $\mathbf{z}_i^t \in \mathbb{R}^d$. This context captures the worker’s key attributes.
+
+We define an \textit{arm} as the abstract representation of a worker-task pair in a specific system state, where each arm is associated with a context vector \( \mathbf{z}_{i,j}^t \in \mathcal{Z} \), encoding the relevant attributes of the pair. At each time slot, the set of all such arm candidates forms a dynamic set, determined by the currently available workers and incoming tasks. These arms are embedded in a continuous \textit{context space} \( \mathcal{Z} \), which serves as the domain for modeling their expected performance.
+
+To facilitate efficient estimation and learning, we partition the context space \(\mathcal{Z}\) into hierarchical regions that are adaptively refined over time. Each cell is associated with a local empirical model of expected task quality, which is updated as new outcomes are observed. This structure enables the system to distinguish between high-performing and low-performing regions, allowing more accurate selection of arms for execution. Moreover, by concentrating exploration on promising areas of the context space, the system can more rapidly converge to high-reward arms, significantly accelerating the identification of optimal or near-optimal assignments.
+
+Given the context vectors \( \mathbf{z}_i^t \), the system computes a value function \( \hat{Q}(\mathbf{z}_i^t) \) for each arm, which reflects the expected reward associated with that arm. This value function captures the overall performance of the arm, implicitly considering factors such as energy consumption and task execution quality. The value function \( \hat{Q}(\mathbf{z}_i^t) \) is learned using a contextual bandit algorithm and gradually converges to the true task quality estimate \( E(Q(\mathbf{z}_i^t)) \) over time.
+
+
+\subsubsection{Value Function}
+To compute the value function, we define a function \( \hat{Q}(\mathbf{z}_i^t) \) that incorporates the confidence interval and hierarchical correction term. The confidence term ensures that the estimate improves with more feedback, and the hierarchical correction term adjusts the estimate based on the granularity of the context space partition. Specifically, the context vector \( \mathbf{z}_i^t \) is mapped to a specific cell \( \mathcal{C}_i^t \) in the context space \( \mathcal{Z} \), and the corresponding reward estimate is computed based on the performance of the arms within that cell. The function \( \hat{Q}(\mathbf{z}_i^t) \) can be expressed as:
+\[
+\hat{Q}(\mathbf{z}_i^t) = \hat{\mu}^{t-1}(\mathcal{C}_i^t) + c^{t-1}(\mathcal{C}_i^t) + \Delta(\mathcal{C}_i^t)
+\]
+where:
+\begin{itemize}
+    \item \( \hat{\mu}^{t-1}(\mathcal{C}_i^t) \) is the empirical estimate of the task quality for the cell \( \mathcal{C}_i^t \) containing vector \( \mathbf{z}_i^t \) at the previous time slot \( t-1 \), based on the historical observations of task completions within that cell;
+    \item \( c^{t-1}(\mathcal{C}_i^t) \) is the confidence term based on previous observations at \( t-1 \), reflecting the number of times arms have been selected within the cell \( \mathcal{C}_i^t \);
+    \item \( \Delta(\mathcal{C}_i^t) \) represents the hierarchical error term, which accounts for the granularity of the context space partition and is adjusted based on how many times the cell \( \mathcal{C}_i^t \) has been split.
+\end{itemize}
+
+In the context of the system, each arm is represented by a context vector \( \mathbf{z}_i^t \), which falls within a specific cell \( \mathcal{C}_i^t \) of the context space \( \mathcal{Z} \). The performance of arms within each cell is observed over time, and the reward \( \hat{Q}(\mathbf{z}_i^t) \) is updated by aggregating the task quality results reported by the workers. Once a cell is selected and the corresponding tasks are executed, feedback is collected and used to refine the estimates for all observed arms within that cell.
+
+The average task quality for cell \( \mathcal{C}_i^t \) is computed as:
+
+\[
+\hat{\mu}^{t-1}(\mathcal{C}_i^t) = 
+\begin{cases} 
+0 & \text{if } t = 0 \\
+\frac{\sum_{\text{selected arms in } \mathcal{C}_i^{t-1}} Q(\mathbf z_i^{t-1})}{N(\mathcal{C}_i^{t-1})} & \text{if } t > 0
+\end{cases}
+\]
+
+where:
+\begin{itemize}
+    \item \( N(\mathcal{C}_i^{t-1}) \) is the total number of selections of arms within cell \( \mathcal{C}_i^t \) until the \( t-1 \) time slot. 
+    \item \( Q(\mathbf z_i^{t-1})\) represents the task quality reported by the worker for the selected arms within that cell.
+\end{itemize}
+
+The confidence term \( c^{t-1}(\mathcal{C}_i^t) \) is computed as:
+\[
+c^{t-1}(\mathcal{C}_i^t) := \sqrt{\frac{\ln T}{N(\mathcal{C}_i^{t-1})}}
+\]
+where:
+\begin{itemize}
+    \item \( T \) is the total number of time slots in the system up to the present.
+\end{itemize}
+
+The hierarchical error term \( \Delta(\mathcal{C}_i^t) \) accounts for the granularity of the context space partition. When a cell is selected too frequently and its performance becomes highly reliable, the cell is split to allow finer granularity in the context space, thus providing more accurate task performance estimates. 
+\[
+\Delta(\mathcal{C}_i^t) = \rho ^h}
+\]
+At refinement level $h$, each cell is recursively divided into two subcells along every dimension, resulting in subcells with diameter exactly $\rho^h$ for some fixed constant $0 < \rho < 1$. Specifically, we use a binary splitting approach where \(\rho = 0.5\), meaning that at each refinement step, each cell is divided into two equal subcells, and the diameter of each subcell decreases by a factor of \(0.5\) at each level.
+
+\subsubsection{Mechanism of Division and Refine}
+In our system, the context space is initially partitioned into multiple broad cells, each representing a region of arms. Each cell is associated with an empirical estimate of the task quality. Over time, as more feedback is gathered, the system adapts the context space by refining the cells. Specifically, when a cell is selected too frequently and its performance becomes sufficiently stable, the cell will undergo a split to create smaller sub-regions for more granular task quality estimation.
+
+The splitting mechanism is triggered when the confidence term \( c^t(\mathcal{C}_i^t) \) satisfies the condition:
+\[
+c^t(\mathcal{C}_i^t) \leq \rho^h,
+\]
+Once the confidence term falls below this threshold, the cell is considered sufficiently refined, and the splitting process is triggered to divide the cell into smaller subcells for further exploration.
+
+Upon satisfying the splitting condition, the cell \( \mathcal{C}_i^t \) is divided into \( N \) smaller sub-cells, which are then added to the set of active regions for future exploration. This process helps the system to focus on promising areas of the context space that show higher expected rewards, while avoiding over-exploration in areas where sufficient performance information has already been gathered. 
+
+This adaptive refinement mechanism ensures that the system progressively improves the precision of task quality estimates by focusing computational resources on more promising regions of the context space.
+
+% 这里已经知道如何估计并更新赌博机，现在我们得到了每个worker对于每个task的完成质量估计，问题转化为worker的分配问题
+
+\subsection{Profit-Optimal Assignment Modeling}
+
+After estimating the task quality \( \hat{Q}(\mathbf{z}_{i,j}^t) \) and energy cost \( C_i^t \) for each arm at time slot \( t \), we define the estimated platform profit as:
+
+\[
+\hat{\Pi}_{i,j}^t = p_j \cdot \hat{Q}(\mathbf{z}_{i,j}^t) - C_i^t
+\]
+This results in a profit matrix $\hat{\Pi}^t \in \mathbb{R}^{N \times M}$.
+
+The task assignment problem is formulated as a maximum-weight bipartite matching between the set of workers and the set of tasks. Each worker $w_i$ can be matched to at most one task $T_j$, and vice versa. The goal is to find a binary assignment matrix $x_{i,j}^t \in \{0, 1\}$ that maximizes the total profit:
+\[
+\max_{x_{i,j}^t} \sum_{i=1}^N \sum_{j=1}^M x_{i,j}^t \cdot \hat{\Pi}_{i,j}^t
+\]
+subject to:
+\begin{align*}
+& \sum_{j=1}^M x_{i,j}^t \leq 1, \quad \forall i \quad \text{(one task per worker)} \\
+& \sum_{i=1}^N x_{i,j}^t = 1, \quad \forall j \quad \text{(each task must be assigned)} \\
+& x_{i,j}^t \in \{0,1\}
+\end{align*}
+
+We solve this assignment problem using the Hungarian algorithm, which computes the optimal one-to-one matching in polynomial time $\mathcal{O}(N^3)$. Since we assume that the number of workers $N$ exceeds the number of tasks $M$, we pad the profit matrix with $N - M$ virtual tasks (columns with zero profit) to obtain a square matrix. This ensures feasibility for the algorithm and enables optimal task allocation based on the estimated reward and cost.
+
+
+
+
+
+\subsection{Algorithm Overview}
+
+Based on the modeling described in the previous section, we now present the full procedure of our adaptive task allocation strategy. At each time slot, the algorithm estimates the contextual quality and profit, solves the profit-maximizing assignment using the Hungarian algorithm, and updates the contextual models based on observed feedback.
+
+To implement our adaptive task assignment framework, we develop an online learning algorithm that iteratively observes the system state and selects an arm allocation strategy that maximizes the platform’s profit. At each time slot, the platform collects the context vectors of available arms and estimates the expected reward (i.e., task quality) and energy consumption for each arm using contextual bandit-based modeling.
+
+Rather than selecting arms solely based on estimated quality, our method jointly considers the estimated reward and cost to compute the expected profit of each arm. We formulate a constrained assignment problem to find the optimal mapping over arms that maximizes the total profit while satisfying system constraints. The full procedure is summarized in Algorithm~\ref{alg:adaptive}.
+
+
+% 这里插入算法整体流程图
+
+\begin{algorithm}[H]
+\caption{Adaptive Contextual Task Allocation Strategy}
+\label{alg:adaptive}
+\begin{algorithmic}[1]
+\FOR{each time slot $t = 1, 2, \dots, T$}
+    \STATE Observe available workers $\mathcal{W}^t$ and incoming tasks $\mathcal{T}^t$
+    \FOR{each worker $w_i^t \in \mathcal{W}^t$}
+        \STATE Construct context vector $\mathbf{z}_i^t$
+        \STATE Identify cell $\mathcal{C}_i^t$ containing $\mathbf{z}_i^t$
+        \STATE Compute estimated task quality $\hat{Q}(\mathbf{z}_i^t)$
+        \STATE Compute estimated cost $C_{i,j}^t$ for each task $T_j^t$
+        \STATE Compute estimated profit $\hat{\Pi}_{i,j}^t = p_j \cdot \hat{Q}(\mathbf{z}_i^t) - C_{i,j}^t$
+    \ENDFOR
+    \STATE Solve the assignment problem:
+        \begin{itemize}
+            \item Decision variable: $x_{i,j}^t \in \{0,1\}$
+            \item Objective: $\max \sum_{i,j} x_{i,j}^t \cdot \hat{\Pi}_{i,j}^t$
+            \item Subject to: constraints on energy, bandwidth, one-task-per-worker, etc.
+        \end{itemize}
+    \STATE Assign selected arms according to optimal $x_{i,j}^t$
+    \STATE Receive feedback $Q(\mathbf{z}_{i,j}^t)$ for each selected arm
+    \FOR{each selected cell $\mathcal{C}_i^t$}
+        \STATE Update $\hat{\mu}(\mathcal{C}_i^t)$, $c(\mathcal{C}_i^t)$
+        \IF{splitting condition is met}
+            \STATE Split cell $\mathcal{C}_i^t$ into sub-cells
+        \ENDIF
+    \ENDFOR
+\ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Computational Complexity Analysis}
+
+In each time slot \( t \), the algorithm executes several key steps, whose computational cost is analyzed below. Let \( N \) denote the number of available workers, \( M \) the number of tasks, \( d \) the dimension of the context vector, and \( N_{\text{cell}}^t \) the number of partitions (cells) in the context space at time \( t \). The total number of possible arms (i.e., worker-task pairs) is given by \( K = N \cdot M \).
+
+\begin{itemize}
+    \item \textbf{Context Construction:} For each arm $(w_i, T_j)$, a $d$-dimensional context vector $\mathbf{z}_{i,j}^t$ is constructed. This results in a complexity of $\mathcal{O}(N \cdot M \cdot d)$.
+
+    \item \textbf{Cell Identification and Profit Estimation:} For each context vector, the algorithm identifies the corresponding cell in the partitioned context space. Assuming a linear scan over $N_{cell}^t$ cells, the total cost is $\mathcal{O}(N \cdot M \cdot P_t)$. Within each cell, the estimated reward $\hat{Q}(\mathbf{z}_{i,j}^t)$, cost $C_{i,j}^t$, and profit $\hat{\Pi}_{i,j}^t$ are computed in constant time.
+
+    \item \textbf{Task Assignment Optimization:} Based on the estimated profits, the platform solves a one-to-one task assignment problem by computing a maximum-weight bipartite matching on an $N \times M$ profit matrix. Since we assume $N > M$, we pad the matrix with $N - M$ virtual tasks (with zero profit) to form a square $N \times N$ matrix. We then apply the Hungarian algorithm, which ensures globally optimal assignment with a worst-case time complexity of $\mathcal{O}(N^3)$.
+
+    \item \textbf{Feedback Update and Cell Refinement:} After task execution, only the partitions corresponding to selected arms are updated. For each affected cell, the empirical mean $\hat{\mu}$ and confidence term $c$ are updated. If the splitting condition is met, the cell is divided into sub-cells. In the worst case, all $N_{\text{cell}}^t$ cells may require updates, leading to a cost of $\mathcal{O}(P_t)$ per round.
+
+\end{itemize}
+
+\noindent
+Combining all steps, the total per-round time complexity is:
+
+\[
+\mathcal{O}(N \cdot M \cdot d + N \cdot M \cdot N_{cell}^t + N^3 + N_{cell}^t)
+\]
+
+\subsection{Regret Analysis}
+
+We provide a theoretical analysis of our adaptive contextual bandit algorithm with cell partitioning. Let $T$ be the time horizon, $d$ the context dimension, and $\rho=1/2$ the splitting parameter.
+
+\subsubsection{Algorithm Properties}
+\begin{itemize}
+    \item The context space $\mathcal{Z}\subseteq[0,1]^d$ is partitioned into hyper-rectangular cells
+    \item Each cell $\mathcal{C}$ at depth $h$ has diameter $\rho^h=2^{-h}$
+    \item Cell $\mathcal{C}$ splits when $c(\mathcal{C}) \leq \rho^h$ where $c(\mathcal{C})=\sqrt{\frac{\ln T}{N(\mathcal{C})}}$
+    \item The UCB for vector $\mathbf{z}$ in cell $\mathcal{C}$ is:
+    \[
+    \hat{Q}(\mathbf{z}_i^t) = \hat{\mu}(\mathcal{C}_i^t) + c(\mathcal{C}_i^t) + \rho^h
+    \]
+\end{itemize}
+
+\subsubsection{Key Lemmas}
+
+\begin{lemma}[Concentration Bound]
+For any cell $\mathcal{C}$ and time $t$, with probability $\geq 1-T^{-2}$:
+\[
+|\hat{\mu}(\mathcal{C}) - \mu(\mathcal{C})| \leq c(\mathcal{C})
+\]
+where $\mu(\mathcal{C})$ is the true mean reward for $\mathcal{C}$.
+\end{lemma}
+
+% 对cell的估计不会过分离谱地低于真实值太多（和refinement level有关）
+\begin{lemma}[Optimal Arm Containment]
+If \(\overset{*}{\mathbf{z}_i^t} \in \mathcal{C}_*\), then with high probability:
+\[
+\hat{Q}(\overset{*}{\mathbf{z}_i^t}) \geq Q(\mathbf{z}_i^t) - O(\rho^{h_*})
+\]
+
+\end{lemma}
+
+\subsubsection{Regret Decomposition}
+
+Let $\Delta_i^t = Q(\overset{*}{\mathbf{z}}_i^t) - Q(\mathbf{z}_i^t)$ be the instantaneous regret for arm $i$ at time $t$. Through the UCB selection rule and context partitioning, we decompose it as:
+
+\begin{align}
+\Delta_i^t &= \underbrace{Q(\overset{*}{\mathbf{z}}_i^t) - \hat{Q}(\overset{*}{\mathbf{z}}_i^t)}_{\text{(a) Optimal arm estimation}} \nonumber \\
+          &+ \underbrace{\hat{Q}(\overset{*}{\mathbf{z}}_i^t) - \hat{Q}(\mathbf{z}_i^t)}_{\text{(b) Suboptimal selection}} \nonumber \\
+          &+ \underbrace{\hat{Q}(\mathbf{z}_i^t) - Q(\mathbf{z}_i^t)}_{\text{(c) Selected arm estimation}} \label{eq:decomp}
+\end{align}
+
+where $\overset{*}{\mathbf{z}}_i^t$ denotes the optimal context vector in the same cell $\mathcal{C}_i^t$ containing $\mathbf{z}_i^t$. We bound each term:
+
+\begin{itemize}
+\item \textbf{(a)} By Lipschitz continuity and cell refinement ($\mathbf{z}_i^t, \overset{*}{\mathbf{z}}_i^t \in \mathcal{C}_i^t$):
+\[
+Q(\overset{*}{\mathbf{z}}_i^t) - \hat{Q}(\overset{*}{\mathbf{z}}_i^t) \leq L\rho^{h} + c(\mathcal{C}_i^t) = O(\rho^{h})
+\]
+
+\item \textbf{(b)} Non-positive due to UCB selection:
+\[
+\hat{Q}(\overset{*}{\mathbf{z}}_i^t) - \hat{Q}(\mathbf{z}_i^t) \leq 0 \quad \text{(since } \mathbf{z}_i^t = \arg\max_{\mathbf{z} \in \mathcal{C}_i^t} \hat{Q}(\mathbf{z}))
+\]
+
+\item \textbf{(c)} Controlled by confidence interval:
+\[
+\hat{Q}(\mathbf{z}_i^t) - Q(\mathbf{z}_i^t) \leq c(\mathcal{C}_i^t) + \rho^h = O\left(\sqrt{\frac{\ln T}{N(\mathcal{C}_i^t)}} + \rho^h\right)
+\]
+\end{itemize}
+
+\noindent Thus, the per-arm regret satisfies:
+\begin{equation}
+\Delta_i^t \leq O\left(\rho^h + \sqrt{\frac{\ln T}{N(\mathcal{C}_i^t)}}\right) \label{eq:per_arm_bound}
+\end{equation}
+
+\subsubsection{Total Regret Analysis}
+Let $M_t \leq M_{\text{max}}$ be the actual number of selected arms at time $t$. The total regret $R(T)$ is:
+
+\begin{align}
+R(T) &= \sum_{t=1}^T \sum_{i=1}^{M_t} \Delta_i^t \nonumber \\
+     &\leq \sum_{t=1}^T \sum_{i=1}^{M_t} O\left(\rho^h + \sqrt{\frac{\ln T}{N(\mathcal{C}_i^t)}}\right) \nonumber \\
+     &= \underbrace{\sum_{t=1}^T M_t \cdot O(\rho^h)}_{\text{Approximation error}} + \underbrace{\sum_{t=1}^T \sum_{i=1}^{M_t} O\left(\sqrt{\frac{\ln T}{N(\mathcal{C}_i^t)}}\right)}_{\text{Estimation error}} \label{eq:total_regret}
+\end{align}
+
+\noindent To prove sublinearity ($R(T) = o(T)$), we analyze both terms:
+
+1. \textbf{Approximation Error}:  
+   With adaptive partitioning ($\rho^h = 2^{-h}$), the worst-case sum is $O(T^{1/(d+2)})$.
+
+2. \textbf{Estimation Error}:  
+   By the splitting condition $c(\mathcal{C}_i^t) \leq \rho^h$, we have:
+   \[
+   \sum_{t,i} \sqrt{\frac{\ln T}{N(\mathcal{C}_i^t)}} \leq \tilde{O}\left(\sqrt{T}\right)
+   \]
+
+\noindent Combining these yields:
+\begin{equation}
+R(T) \leq \tilde{O}\left(T^{\frac{d+1}{d+2}}\right) \label{eq:final_bound}
+\end{equation}
+
+
+
+
+% \noindent
+% In line with the semi-bandit feedback assumption, the platform receives individual task quality observations in the form of $Q(\mathbf{z}_i^t)$ for each selected arm. These context-dependent observations are used to update the empirical mean $\hat{\mu}(\mathcal{C}_i^t)$ and confidence bound $c(\mathcal{C}_i^t)$ associated with the corresponding region $\mathcal{C}_i^t$ in the context space. This feedback-driven update mechanism allows the system to progressively refine its value estimates and focus future exploration on high-potential regions.
+

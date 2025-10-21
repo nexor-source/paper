@@ -1,31 +1,35 @@
-\section{Experiments}
+﻿\section{Experiments}
 \label{sec:experiments}
 
 \subsection{Setup}
-We implement a custom simulation framework in Python to model the interactions among video analysis tasks, worker nodes, and the platform. All experiments are conducted on a local desktop equipped with an Intel Core i5-13400F CPU (10 cores, 16 threads, base frequency 2.50GHz, up to 4.0GHz). GPU acceleration is not used; all computations are performed on a single-threaded CPU setup.
+We implement a custom Python simulation to emulate a crowd-powered video analytics platform. All experiments run on a local desktop (Intel Core i5-13400F, 10 cores/16 threads, 2.50--4.0\,GHz) without GPU acceleration. The simulator generates synthetic task streams, models heterogeneous mobile workers, and executes the full scheduling loop including context normalization, quality estimation, and assignment.
 
-We evaluate the proposed method (denoted as \textbf{Original}) in a synthetic scheduling environment and compare it with a random baseline (\textbf{Random}). Additionally, we include an \textbf{Oracle} policy that uses ground-truth success probabilities as an upper bound reference. To ensure fairness, we pre-generate a fixed task arrival sequence that is shared across all algorithms. Success or failure of each assignment is sampled from a Bernoulli distribution with a fixed random seed (42) to ensure reproducibility.
+We compare four policies:
+\textbf{Ours} (our method, Hungarian matching with adaptive partitioning),
+\textbf{Greedy} (ranking candidates by estimated reward and greedily selecting non-conflicting pairs),
+\textbf{Random} (baseline without learning), and an \textbf{Oracle} that knows the ground-truth success probability $p(x)$ and serves as an upper bound.
+All methods share the same pre-generated task streams and reward samples (Bernoulli draws with a fixed seed) to ensure a fair comparison.
 
-Task-to-worker matching is performed using the Hungarian algorithm. All experiments are conducted under the default configuration provided in the source code.
+Unless otherwise stated, we enable worker dynamics so that the worker pool evolves during training. This highlights the ability of Ours to adapt to changing supply while maintaining a stable advantage over Greedy/Random.
 
 \subsection{Workload and Environment}
-The system consists of a worker pool (initially 10 workers), a task queue, and a context normalization module. At each time step, a number of new tasks arrive, triggering one round of task assignment and execution.
+The simulated platform contains a task queue, a dynamic worker pool (initially 10 workers), and a context normalizer. Each round consists of new task arrivals, candidate generation, matching, execution, and online model updates.
 
-\textbf{Task arrival:} At each time step, a random number of tasks arrive, drawn uniformly from $U[6,16)$. Each task is characterized by attributes such as type, data size, and deadline. We simulate $T=300$ time steps in total (COMPARISON\_STEPS=300).
+\textbf{Task arrival:} At step $t$ we sample $N_t \sim \mathcal{U}\{6, \ldots, 15\}$ tasks. Each task carries attributes such as type, data size, deadline, and implicit quality preferences. We run $T=1000$ time steps in the main experiments.
 
-\textbf{Worker features:} Each worker is described by attributes such as driving speed and bandwidth, normalized into $[0,1]$ based on predefined ranges. In this experiment, we focus on two-dimensional contexts (\texttt{context\_dim=2}): speed and bandwidth.
+\textbf{Worker features:} Workers are characterised by driving speed, bandwidth, processor speed, physical distance, task type compatibility, data size tolerance, and weather robustness. All features are normalized into $[0,1]$ using the ranges in \texttt{WORKER\_FEATURE\_VALUES\_RANGE}.
 
-\textbf{Worker dynamics:} To ensure a fair comparison, we disable worker dynamics by default (\texttt{ENABLE\_WORKER\_DYNAMICS\_COMPARISON=False}), meaning the worker pool remains static and consistent across algorithms.
-
-The normalization ranges for each feature are defined in \texttt{WORKER\_FEATURE\_VALUES\_RANGE}, e.g., driving speed $(0, 40)$ m/s and bandwidth $(0, 1000)$ Mbps.
+\textbf{Worker dynamics:} At every step each worker independently leaves with probability $0.03$. New workers join with probability $0.15$ and a batch size sampled from $\{1,2,3\}$. This keeps the expected number of active workers close to ten, mimicking a moderately dynamic deployment.
 
 \subsection{Methods}
 
-\textbf{Original (proposed):} The core algorithm is an online replicate-and-match strategy based on adaptive context partitioning. When a partition cell accumulates enough samples, it is refined by splitting along the longest dimension. The quality estimate combines prior beliefs and posterior observations. During assignment, the estimated net reward (estimated success probability minus replication cost) is converted into a cost matrix, and the Hungarian algorithm is used to compute one-to-one matching. Only pairs with positive net reward are retained.
+\textbf{Ours (proposed):} We maintain an adaptive partition tree over the context space. Each leaf stores a Beta posterior with prior $\alpha_0,\beta_0$ and observed successes/failures. When the posterior variance remains high after observing \texttt{PARTITION\_MIN\_SAMPLES} assignments, the leaf is split along the longest dimension. At decision time, we compute the posterior mean (optionally plus UCB bonus) minus replication cost to form a net reward matrix and solve a one-to-one matching with the Hungarian algorithm. Only positive-net pairs are retained.
 
-\textbf{Random (baseline):} From all candidate worker-task pairs, pairs with non-positive net reward are first filtered out. The remaining ones are randomly shuffled and greedily selected (without conflicts) until no further assignments can be made.
+\textbf{Greedy (baseline):} Uses the same posterior estimates as Ours but ranks candidate pairs in descending order of estimated net reward and greedily picks non-conflicting pairs until no positive-net option remains. This baseline reflects the widely-used ``max score per assignment'' heuristic.
 
-\textbf{Oracle (upper bound):} Based on ground-truth success probabilities $p(\cdot)$, a net reward matrix is constructed using $p - \text{cost}$, and the optimal one-to-one assignment is computed using the Hungarian algorithm. The oracle is only used as a reference in the cumulative net reward curve; it does not participate in learning or in the regret/loss plot.
+\textbf{Random (baseline):} Filters out non-positive pairs, randomly shuffles the rest, and greedily selects non-conflicting pairs.
+
+\textbf{Oracle (upper bound):} Uses the ground-truth $p(x)$ to fill the net reward matrix ($p(x)-c$) and runs the Hungarian algorithm. Oracle does not learn; it only serves as an upper bound in the plots.
 
 \subsection{Success Probability and Reward}
 Given a normalized context vector $x \in [0,1]^d$, the success probability $p(x)$ is simulated using a smooth, nonlinear function that includes:
@@ -56,40 +60,58 @@ To ensure fairness, all algorithms run independently on the same task stream, an
 The default hyperparameters used in the experiments are:
 
 \begin{itemize}
-    \item Replication cost: $c = 0.1$ (\texttt{replication\_cost})
+    \item Replication cost: $c = 0.2$ (\texttt{REPLICATION\_COST})
     \item Maximum replicas per task: $B = 1$ (\texttt{budget})
     \item Partition split threshold: $\tau = 10$ (\texttt{partition\_split\_threshold})
-    \item Maximum partition depth: $D = 8$ (\texttt{MAX\_PARTITION\_DEPTH})
+    \item Minimum samples before split: $6$ (\texttt{PARTITION\_MIN\_SAMPLES})
+    \item Variance threshold for split: $0.01$ (\texttt{PARTITION\_VARIANCE\_THRESHOLD})
+    \item Maximum partition depth: $D = 64$ (\texttt{MAX\_PARTITION\_DEPTH})
     \item Split strategy: longest dimension (\texttt{PARTITION\_SPLIT\_STRATEGY=longest})
     \item Batch size: 10 (\texttt{COMPARISON\_BATCH\_SIZE})
-    \item Total steps: 300 (\texttt{COMPARISON\_STEPS})
-    \item Random seed: 42 (\texttt{RANDOM\_SEED})
+    \item Total steps: 1000 (\texttt{COMPARISON\_STEPS})
+    \item Random seed: 43 (\texttt{RANDOM\_SEED})
 \end{itemize}
 
 \subsection{Results}
 
-Figure~\ref{fig:loss} shows the per-step loss (gap from oracle net reward). We observe that the proposed method significantly outperforms the Random baseline, indicating better selection and estimation of high-reward worker-task pairs.
-
-% This should be, but not for now
-% Figure~\ref{fig:cum} presents the cumulative net reward curves. The proposed method maintains consistently higher net reward than Random and approaches the Oracle upper bound over time. The remaining gap is expected due to exploration needs and sampling variance. These results validate the effectiveness of our adaptive context partitioning and refinement mechanism in a dynamic environment.
+Figure~\ref{fig:loss} plots the per-step loss (regret). Ours quickly drives the regret below both Greedy and Random, confirming that adaptive partitioning accelerates convergence even under worker arrivals/departures. For a clearer long-term trend we also report a smoothed view (Figure~\ref{fig:loss_smooth}) obtained via a rolling mean (window $=50$) together with a 10--90\% quantile band; the smoothed curve shows Ours consistently maintaining the lowest regret plateau.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.95\linewidth]{VideoAnalytics/fig/compare_loss.png}
-\caption{Per-step loss (lower is better). Original vs. Random.}
+\caption{Per-step loss. Ours vs. Greedy vs. Random.}
 \label{fig:loss}
 \end{figure}
 
 \begin{figure}[t]
 \centering
+\includegraphics[width=0.95\linewidth]{VideoAnalytics/fig/compare_loss_smooth.png}
+\caption{Smoothed per-step loss (rolling mean window $=50$, shaded area: 10--90\% percentile band).}
+\label{fig:loss_smooth}
+\end{figure}
+
+Figure~\ref{fig:cum} further shows that Ours accumulates the highest net reward realized and tracks the Oracle upper bound much more closely than the baselines.
+
+\begin{figure}[t]
+\centering
 \includegraphics[width=0.95\linewidth]{VideoAnalytics/fig/compare_cum_reward.png}
-\caption{Cumulative net reward. Original vs. Random vs. Oracle.}
+\caption{Realized cumulative net reward. Ours remains ahead of Greedy/Random while approaching Oracle.}
 \label{fig:cum}
+\end{figure}
+
+\paragraph{Challenge scenario.}\label{sec:challenge}
+We further construct a conflict-heavy benchmark where different task clusters strongly favor different worker specialties. In this regime, Greedy often allocates the same “universal” workers to multiple clusters and leaves other tasks under-served, while Ours uses the Hungarian solver to coordinate assignments globally. Figure~\ref{fig:challenge_totals} shows that Ours accumulates a larger reward margin over Greedy in this setting.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.95\linewidth]{VideoAnalytics/fig/challenge_totals.png}
+\caption{Conflict-heavy benchmark (Section~\ref{sec:challenge}): Ours secures a larger margin over Greedy.}
+\label{fig:challenge_totals}
 \end{figure}
 
 \subsection{Ablations and Reproducibility}
 
-\textbf{Worker Dynamics.} The framework allows toggling worker arrival and ability drift via \texttt{ENABLE\_WORKER\_DYNAMICS\_COMPARISON}. We disable this feature by default to reduce confounding factors and ensure fair comparison across methods.
+\textbf{Worker Dynamics.} All reported experiments enable the dynamic-arrival setting (leave probability 0.03, join probability 0.15 with batches of 1–3). For ablations we additionally run a static variant by disabling dynamics.
 
 \textbf{Task Stream and Randomness.} The task stream is pre-generated and shared across all methods. Randomness in reward sampling is controlled using a fixed global seed.
 

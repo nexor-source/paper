@@ -1,6 +1,6 @@
 """
 Extended challenge scenario to demonstrate the advantage of the Hungarian
-matching (Original) over a simple greedy selector (Greedy) in large,
+matching (Ours) over a simple greedy selector (Greedy) in large,
 conflicting environments.
 
 Main ideas:
@@ -12,7 +12,7 @@ Main ideas:
       that changes over time (staggered and rotating demand).
     - Greedy tends to consume the same strong workers for the first few tasks
       and later leaves some tasks matched with mediocre workers.
-    - Hungarian (Original) considers all pairings jointly and avoids clashes.
+    - Hungarian (Ours) considers all pairings jointly and avoids clashes.
 
 The script runs multiple independent steps, prints detailed assignments, and
 saves heatmaps & reward plots under output/challenge/.
@@ -195,7 +195,7 @@ def plot_heatmap(step_idx: int,
     for ax, picks, title in zip(
         axes,
         [picks_o, picks_g],
-        ["Original (Hungarian)", "Greedy"],
+        ["Ours (Hungarian)", "Greedy"],
     ):
         im = ax.imshow(profits, cmap="viridis", vmin=0.0, vmax=vmax)
         ax.set_xticks(range(len(workers)))
@@ -211,7 +211,7 @@ def plot_heatmap(step_idx: int,
             ax.text(w, t, f"{val:.2f}", color="white", ha="center", va="center", fontsize=8, weight="bold")
 
     fig.colorbar(im, ax=axes, fraction=0.046, pad=0.04, label="Expected net reward")
-    fig.suptitle(f"Step {step_idx}: Original vs Greedy selections", fontsize=13, fontweight="bold")
+    fig.suptitle(f"Step {step_idx}: Ours vs Greedy selections", fontsize=13, fontweight="bold")
     fig.savefig(OUTPUT_DIR / f"step_{step_idx:03d}.png", dpi=150)
     plt.close(fig)
 
@@ -223,7 +223,7 @@ def plot_totals(step_totals: Dict[str, List[float]],
     fig, axes = plt.subplots(1, 2, figsize=(12, 4), constrained_layout=True)
 
     colors = {
-        "Original": "C0",
+        "Ours": "C0",
         "Greedy": "C2",
     }
 
@@ -235,7 +235,7 @@ def plot_totals(step_totals: Dict[str, List[float]],
 
     # Step rewards (use line + light markers; highlight gap)
     bar_width = 0.35
-    offset = {"Original": -bar_width / 2, "Greedy": bar_width / 2}
+    offset = {"Ours": -bar_width / 2, "Greedy": bar_width / 2}
     for label, series in step_totals.items():
         axes[0].bar(
             steps + offset[label],
@@ -281,7 +281,7 @@ def plot_totals(step_totals: Dict[str, List[float]],
     axes[1].grid(True, alpha=0.3)
     axes[1].legend()
 
-    fig.suptitle("Challenge Scenario – Original vs Greedy", fontsize=14, fontweight="bold")
+    fig.suptitle("Challenge Scenario – Ours vs Greedy", fontsize=14, fontweight="bold")
     fig.savefig(OUTPUT_DIR / "challenge_totals.png", dpi=150)
     plt.close(fig)
 
@@ -294,9 +294,9 @@ def run_challenge(
     workers = build_workers(workers_per_group=workers_per_group)
     print(f"[info] workers: {len(workers)} (per speciality {workers_per_group})")
 
-    step_totals = {"Original": [], "Greedy": []}
-    cumulative = {"Original": [], "Greedy": []}
-    cum_vals = {"Original": 0.0, "Greedy": 0.0}
+    step_totals = {"Ours": [], "Greedy": []}
+    cumulative = {"Ours": [], "Greedy": []}
+    cum_vals = {"Ours": 0.0, "Greedy": 0.0}
 
     for step_idx in range(steps):
         tasks = build_tasks(step_idx, num_tasks=num_tasks)
@@ -305,16 +305,16 @@ def run_challenge(
         total_o, picks_o = hungarian_select(profits)
         total_g, picks_g = greedy_select(profits)
 
-        step_totals["Original"].append(total_o)
+        step_totals["Ours"].append(total_o)
         step_totals["Greedy"].append(total_g)
 
-        cum_vals["Original"] += total_o
+        cum_vals["Ours"] += total_o
         cum_vals["Greedy"] += total_g
 
-        cumulative["Original"].append(cum_vals["Original"])
+        cumulative["Ours"].append(cum_vals["Ours"])
         cumulative["Greedy"].append(cum_vals["Greedy"])
 
-        print(f"Step {step_idx:03d} | Original={total_o:.3f}, Greedy={total_g:.3f}")
+        print(f"Step {step_idx:03d} | Ours={total_o:.3f}, Greedy={total_g:.3f}")
 
         if step_idx < 10 or step_idx % max(1, steps // 10) == 0:
             plot_heatmap(step_idx, profits, picks_o, picks_g, workers, tasks)
@@ -322,11 +322,11 @@ def run_challenge(
     plot_totals(step_totals, cumulative)
 
     print("\n=== Challenge Summary ===")
-    for label in ["Original", "Greedy"]:
+    for label in ["Ours", "Greedy"]:
         print(f"{label:>8s} cumulative reward: {cum_vals[label]:.3f}")
 
-    diff = cum_vals["Original"] - cum_vals["Greedy"]
-    print(f"Difference (Original - Greedy): {diff:.3f}")
+    diff = cum_vals["Ours"] - cum_vals["Greedy"]
+    print(f"Difference (Ours - Greedy): {diff:.3f}")
     print(f"Figures saved under: {OUTPUT_DIR}")
 
 

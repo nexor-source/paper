@@ -251,38 +251,70 @@ class Scheduler:
 
 
 
-    def _apply_worker_dynamics(self) -> None:
-        """模拟真实工人的离开、加入与属性漂移；使用全局 np.random。"""
-        if not hasattr(self, "next_worker_id"):
-            self.next_worker_id = (max((w.worker_id for w in self.workers), default=-1) + 1)
-
-        try:
-            dynamics = WORKER_DYNAMICS
-        except NameError:
-            dynamics = {
-                "leave_prob": 0.05,
-                "join_prob": 0.10,
-                "join_count_range": (0, 2),
-                "drift_frac": {
-                    "driving_speed": 0.03,
-                    "bandwidth": 0.05,
-                    "processor_performance": 0.02,
-                    "physical_distance": 0.05,
-                },
-                "weather_change_prob": 0.03,
-            }
-
-        leave_prob = float(dynamics.get("leave_prob", 0.05))
-        join_prob = float(dynamics.get("join_prob", 0.10))
-        join_lo, join_hi = dynamics.get("join_count_range", (0, 2))
-        drift_frac = dynamics.get("drift_frac", {})
-        weather_change_prob = float(dynamics.get("weather_change_prob", 0.03))
-
-        keep_flags = [np.random.random() >= leave_prob for _ in self.workers]
-        if any(keep_flags) is False and len(self.workers) > 0:
-            keep_flags[np.random.randint(0, len(self.workers))] = True
-        self.workers = [w for w, keep in zip(self.workers, keep_flags) if keep]
-
+    def _apply_worker_dynamics(self) -> None:
+
+        """模拟真实工人的离开、加入与属性漂移；使用全局 np.random。"""
+
+        if not hasattr(self, "next_worker_id"):
+
+            self.next_worker_id = (max((w.worker_id for w in self.workers), default=-1) + 1)
+
+
+
+        try:
+
+            dynamics = WORKER_DYNAMICS
+
+        except NameError:
+
+            dynamics = {
+
+                "leave_prob": 0.05,
+
+                "join_prob": 0.10,
+
+                "join_count_range": (0, 2),
+
+                "drift_frac": {
+
+                    "driving_speed": 0.03,
+
+                    "bandwidth": 0.05,
+
+                    "processor_performance": 0.02,
+
+                    "physical_distance": 0.05,
+
+                },
+
+                "weather_change_prob": 0.03,
+
+            }
+
+
+
+        leave_prob = float(dynamics.get("leave_prob", 0.05))
+
+        join_prob = float(dynamics.get("join_prob", 0.10))
+
+        join_lo, join_hi = dynamics.get("join_count_range", (0, 2))
+
+        drift_frac = dynamics.get("drift_frac", {})
+
+        weather_change_prob = float(dynamics.get("weather_change_prob", 0.03))
+
+
+
+        keep_flags = [np.random.random() >= leave_prob for _ in self.workers]
+
+        if any(keep_flags) is False and len(self.workers) > 0:
+
+            keep_flags[np.random.randint(0, len(self.workers))] = True
+
+        self.workers = [w for w, keep in zip(self.workers, keep_flags) if keep]
+
+
+
         n_join = 0
         if np.random.random() < join_prob:
             if join_hi >= join_lo and join_lo >= 0:
@@ -291,32 +323,58 @@ class Scheduler:
             new_w = spawn_new_worker(self.next_worker_id)
             self.workers.append(new_w)
             self.next_worker_id += 1
-
-        def clip(v: float, lo: float, hi: float) -> float:
-            return float(min(max(v, lo), hi))
-
-        ranges = WORKER_FEATURE_VALUES_RANGE
-        for w in self.workers:
-            if "driving_speed" in drift_frac and "driving_speed" in ranges:
-                lo, hi = ranges["driving_speed"]
-                std = float(drift_frac["driving_speed"]) * (hi - lo)
-                w.driving_speed = clip(w.driving_speed + float(np.random.normal(0.0, std)), lo, hi)
-            if "bandwidth" in drift_frac and "bandwidth" in ranges:
-                lo, hi = ranges["bandwidth"]
-                std = float(drift_frac["bandwidth"]) * (hi - lo)
-                w.bandwidth = clip(w.bandwidth + float(np.random.normal(0.0, std)), lo, hi)
-            if "processor_performance" in drift_frac and "processor_performance" in ranges:
-                lo, hi = ranges["processor_performance"]
-                std = float(drift_frac["processor_performance"]) * (hi - lo)
-                w.processor_perf = clip(w.processor_perf + float(np.random.normal(0.0, std)), lo, hi)
-            if "physical_distance" in drift_frac and "physical_distance" in ranges:
-                lo, hi = ranges["physical_distance"]
-                std = float(drift_frac["physical_distance"]) * (hi - lo)
-                w.physical_distance = clip(w.physical_distance + float(np.random.normal(0.0, std)), lo, hi)
-            if np.random.random() < weather_change_prob:
-                max_w = int(ranges.get("weather", (0, 4))[1])
-                w.weather = int(np.random.randint(0, max_w + 1))
-
+
+
+        def clip(v: float, lo: float, hi: float) -> float:
+
+            return float(min(max(v, lo), hi))
+
+
+
+        ranges = WORKER_FEATURE_VALUES_RANGE
+
+        for w in self.workers:
+
+            if "driving_speed" in drift_frac and "driving_speed" in ranges:
+
+                lo, hi = ranges["driving_speed"]
+
+                std = float(drift_frac["driving_speed"]) * (hi - lo)
+
+                w.driving_speed = clip(w.driving_speed + float(np.random.normal(0.0, std)), lo, hi)
+
+            if "bandwidth" in drift_frac and "bandwidth" in ranges:
+
+                lo, hi = ranges["bandwidth"]
+
+                std = float(drift_frac["bandwidth"]) * (hi - lo)
+
+                w.bandwidth = clip(w.bandwidth + float(np.random.normal(0.0, std)), lo, hi)
+
+            if "processor_performance" in drift_frac and "processor_performance" in ranges:
+
+                lo, hi = ranges["processor_performance"]
+
+                std = float(drift_frac["processor_performance"]) * (hi - lo)
+
+                w.processor_perf = clip(w.processor_perf + float(np.random.normal(0.0, std)), lo, hi)
+
+            if "physical_distance" in drift_frac and "physical_distance" in ranges:
+
+                lo, hi = ranges["physical_distance"]
+
+                std = float(drift_frac["physical_distance"]) * (hi - lo)
+
+                w.physical_distance = clip(w.physical_distance + float(np.random.normal(0.0, std)), lo, hi)
+
+            if np.random.random() < weather_change_prob:
+
+                max_w = int(ranges.get("weather", (0, 4))[1])
+
+                w.weather = int(np.random.randint(0, max_w + 1))
+
+
+
     def _expected_total_reward(self, assignments: List[Assignment]) -> float:
         """基于真实成功概率的期望总净收益: sum(p(context) - replication_cost)."""
         if not assignments:
@@ -638,9 +696,9 @@ def run_experiment() -> None:
 
     - 初始化随机种子与输出目录；
     - 构建基础工人集与 ContextNormalizer；
-    - 预生成共享任务流（Original/Random/Greedy/Oracle 共用，同一分布、同一顺序）；
-    - 分别运行 Original、Random、Greedy、Oracle 四种策略并对比：
-      Original 在循环内每 10 步输出一次上下文划分可视化 `output/partition_{step}.png`；
+    - 预生成共享任务流（Ours/Random/Greedy/Oracle 共用，同一分布、同一顺序）；
+    - 分别运行 Ours、Random、Greedy、Oracle 四种策略并对比：
+      Ours 在循环内每 10 步输出一次上下文划分可视化 `output/partition_{step}.png`；
     - 最后保存对比图到 `output/compare_loss.png` 与 `output/compare_cum_reward.png`。
 
     相关配置见 config.py：RANDOM_SEED、COMPARISON_STEPS、COMPARISON_BATCH_SIZE、
@@ -834,7 +892,7 @@ def run_experiment() -> None:
                 pred_error_all_count += float(res.get("pred_error_all_count", 0.0))
             if collect_details:
                 payload = res.get("inspection")
-                _maybe_render_inspection("Original", s, scheduler, predict_net, payload)
+                _maybe_render_inspection("Ours", s, scheduler, predict_net, payload)
             if s % 50 == 0:
                 try:
                     visualizer = PartitionVisualizer(replicator.partitions)
@@ -852,7 +910,7 @@ def run_experiment() -> None:
         if pred_error_all_count > 0:
             avg_err_all = float(pred_error_all_sum / pred_error_all_count)
             avg_abs_err_all = float(pred_error_all_abs_sum / pred_error_all_count)
-            print("[prediction-bias][Original][all] mean={:.4f}, mean_abs={:.4f}, samples={}".format(
+            print("[prediction-bias][Ours][all] mean={:.4f}, mean_abs={:.4f}, samples={}".format(
                 avg_err_all,
                 avg_abs_err_all,
                 int(pred_error_all_count),
@@ -860,7 +918,7 @@ def run_experiment() -> None:
         if pred_error_sel_count > 0:
             avg_err_sel = float(pred_error_sel_sum / pred_error_sel_count)
             avg_abs_err_sel = float(pred_error_sel_abs_sum / pred_error_sel_count)
-            print("[prediction-bias][Original][selected] mean={:.4f}, mean_abs={:.4f}, samples={}".format(
+            print("[prediction-bias][Ours][selected] mean={:.4f}, mean_abs={:.4f}, samples={}".format(
                 avg_err_sel,
                 avg_abs_err_sel,
                 int(pred_error_sel_count),
@@ -1043,7 +1101,7 @@ def run_experiment() -> None:
     # (debug prints removed)
 
     plt.figure(figsize=(9, 4))
-    plt.plot(loss_o, label="Original", linewidth=1.0, alpha=0.7)
+    plt.plot(loss_o, label="Ours", linewidth=1.0, alpha=0.7)
     plt.plot(loss_r, label="Random", linewidth=1.0, alpha=0.7)
     plt.plot(loss_g, label="Greedy", linewidth=1.0, alpha=0.7)
     plt.title("Loss Comparison (raw)")
@@ -1097,7 +1155,7 @@ def run_experiment() -> None:
     plt.figure(figsize=(9, 4))
     if lo_b is not None and hi_b is not None:
         plt.fill_between(xo, lo_b, hi_b, color='C0', alpha=0.12)
-    plt.plot(xo, mo, label="Original (mean)", color='C0', linewidth=2.0)
+    plt.plot(xo, mo, label="Ours (mean)", color='C0', linewidth=2.0)
 
     if lr_b is not None and hr_b is not None:
         plt.fill_between(xr, lr_b, hr_b, color='C1', alpha=0.12)
@@ -1124,7 +1182,7 @@ def run_experiment() -> None:
     steps_axis_g = np.arange(len(err_g))
 
     plt.figure(figsize=(9, 4))
-    plt.plot(steps_axis, err_o, label="Original", color='C0', linewidth=1.0, alpha=0.85)
+    plt.plot(steps_axis, err_o, label="Ours", color='C0', linewidth=1.0, alpha=0.85)
     plt.plot(steps_axis_g, err_g, label="Greedy", color='C2', linewidth=1.0, alpha=0.85)
     plt.axhline(0.0, color='k', linestyle='--', linewidth=0.8, alpha=0.4)
     plt.title("Prediction Bias (Signed Error on Selected Assignments)")
@@ -1137,7 +1195,7 @@ def run_experiment() -> None:
     plt.close()
 
     plt.figure(figsize=(9, 4))
-    plt.plot(steps_axis, err_abs_o, label="Original", color='C0', linewidth=1.0, alpha=0.85)
+    plt.plot(steps_axis, err_abs_o, label="Ours", color='C0', linewidth=1.0, alpha=0.85)
     plt.plot(steps_axis_g, err_abs_g, label="Greedy", color='C2', linewidth=1.0, alpha=0.85)
     plt.title("Prediction Error Magnitude on Selected Assignments")
     plt.xlabel("Step")
@@ -1149,7 +1207,7 @@ def run_experiment() -> None:
     plt.close()
 
     plt.figure(figsize=(9, 4))
-    plt.plot(cum_o, label="Original")
+    plt.plot(cum_o, label="Ours")
     plt.plot(cum_r, label="Random")
     plt.plot(cum_g, label="Greedy")
     plt.plot(cum_orc, label="Oracle")
@@ -1165,7 +1223,7 @@ def run_experiment() -> None:
     # New: Expected cumulative net reward (sum of expected net per step)
     plt.figure(figsize=(9, 4))
     # 使用不同的线型，避免重叠时“看成三条线”的错觉
-    plt.plot(cum_eo, label="Original", color='C0', linestyle='-', linewidth=2.0, alpha=0.95, zorder=3)
+    plt.plot(cum_eo, label="Ours", color='C0', linestyle='-', linewidth=2.0, alpha=0.95, zorder=3)
     plt.plot(cum_er, label="Random",   color='C1', linestyle='--', linewidth=2.0, alpha=0.95, zorder=2)
     plt.plot(cum_eg, label="Greedy",    color='C2', linestyle='-.', linewidth=2.0, alpha=0.95, zorder=4)
     plt.plot(cum_eorc, label="Oracle",  color='C3', linestyle='-', linewidth=2.5, alpha=0.95, zorder=5)
@@ -1191,11 +1249,11 @@ def run_experiment() -> None:
     avg_orc, tot_orc, n_orc = _avg_expected(cum_eorc, assign_orc)
 
     print("[avg-expected-net] per selected assignment:")
-    print(f"  Original: {avg_o:.4f} (total={tot_o:.2f}, selected={n_o})")
+    print(f"  Ours: {avg_o:.4f} (total={tot_o:.2f}, selected={n_o})")
     print(f"  Random  : {avg_r:.4f} (total={tot_r:.2f}, selected={n_r})")
     print(f"  Greedy  : {avg_g:.4f} (total={tot_g:.2f}, selected={n_g})")
     print(f"  Oracle  : {avg_orc:.4f} (total={tot_orc:.2f}, selected={n_orc})")
-    print("Saved loss (Original/Random) and cumulative reward (Original/Random/Oracle) plots.")
+    print("Saved loss (Ours/Random) and cumulative reward (Ours/Random/Oracle) plots.")
 
     return
 

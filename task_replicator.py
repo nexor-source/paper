@@ -248,6 +248,7 @@ class TaskReplicator:
             self.variance_split_threshold = 0.02
         self.variance_split_threshold = max(0.0, self.variance_split_threshold)
         self.total_updates = 0
+        self.split_events = 0  # number of times partitions were subdivided
 
         # 调试用的计数器
         self._run_counter = 0
@@ -459,6 +460,7 @@ class TaskReplicator:
             # 样本数达到阈值后进行二分细分（受最大层级限制）
             if self._should_split(p):
                 p.subdivide()
+                self.split_events += 1
                 if p in self.partitions:
                     self.partitions.remove(p)
                     self.partitions.extend(p.children)

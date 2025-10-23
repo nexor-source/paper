@@ -907,6 +907,7 @@ def run_experiment() -> None:
                     )
                 except Exception as _e:
                     print(f"[viz] failed to render partition at step {s}: {_e}")
+        split_events = replicator.split_events
         if pred_error_all_count > 0:
             avg_err_all = float(pred_error_all_sum / pred_error_all_count)
             avg_abs_err_all = float(pred_error_all_abs_sum / pred_error_all_count)
@@ -923,7 +924,7 @@ def run_experiment() -> None:
                 avg_abs_err_sel,
                 int(pred_error_sel_count),
             ))
-        return loss_c, cum_c, cum_exp_c, assign_counts, pred_error_mean_series, pred_error_abs_series
+        return loss_c, cum_c, cum_exp_c, assign_counts, pred_error_mean_series, pred_error_abs_series, split_events
 
     def run_with_selector(
         selector_factory,
@@ -1004,6 +1005,7 @@ def run_experiment() -> None:
             if collect_details:
                 payload = res.get("inspection")
                 _maybe_render_inspection(method_label, s, scheduler, predict_fn, payload)
+        split_events = replicator.split_events
         if track_pred_error and pred_error_all_count > 0:
             avg_err_all = float(pred_error_all_sum / pred_error_all_count)
             avg_abs_err_all = float(pred_error_all_abs_sum / pred_error_all_count)
@@ -1018,20 +1020,20 @@ def run_experiment() -> None:
             avg_abs_err_sel = float(pred_error_sel_abs_sum / pred_error_sel_count)
             print("[prediction-bias][{}][selected] mean={:.4f}, mean_abs={:.4f}, samples={}".format(
                 method_label,
-                avg_err_sel,
-                avg_abs_err_sel,
-                int(pred_error_sel_count),
-            ))
-        return loss_c, cum_c, cum_exp_c, assign_counts, pred_error_mean_series, pred_error_abs_series
+            avg_err_sel,
+            avg_abs_err_sel,
+            int(pred_error_sel_count),
+        ))
+        return loss_c, cum_c, cum_exp_c, assign_counts, pred_error_mean_series, pred_error_abs_series, split_events
 
     # Baselines
-    loss_r, cum_r, cum_er, assign_r, _pred_err_r, _pred_err_abs_r = run_with_selector(
+    loss_r, cum_r, cum_er, assign_r, _pred_err_r, _pred_err_abs_r, _split_r = run_with_selector(
         lambda _rep: RandomBaseline().select,
         method_label="Random",
         update_model=False,
         use_oracle_eval=False,
     )
-    loss_g, cum_g, cum_eg, assign_g, pred_err_g, pred_err_abs_g = run_with_selector(
+    loss_g, cum_g, cum_eg, assign_g, pred_err_g, pred_err_abs_g, split_g = run_with_selector(
         lambda rep: GreedyBaseline(rep).select,
         method_label="Greedy",
         update_model=True,
@@ -1093,10 +1095,15 @@ def run_experiment() -> None:
             if collect_details:
                 payload = res.get("inspection")
                 _maybe_render_inspection("Oracle", s, scheduler, predict_net, payload)
-        return loss_c, cum_c, cum_exp_c, assign_counts
+        split_events = replicator.split_events
+        return loss_c, cum_c, cum_exp_c, assign_counts, split_events
 
-    loss_o, cum_o, cum_eo, assign_o, pred_err_o, pred_err_abs_o = run_original()
-    loss_orc, cum_orc, cum_eorc, assign_orc = run_oracle()
+    loss_o, cum_o, cum_eo, assign_o, pred_err_o, pred_err_abs_o, split_o = run_original()
+    loss_orc, cum_orc, cum_eorc, assign_orc, split_orc = run_oracle()
+
+    print("[partition-splits] Ours   :", int(split_o))
+    print("[partition-splits] Greedy :", int(split_g))
+    print("[partition-splits] Oracle :", int(split_orc))
 
     # (debug prints removed)
 

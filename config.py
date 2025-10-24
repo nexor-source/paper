@@ -1,18 +1,21 @@
-﻿# config.py
+"""Global configuration for the task replication experiments."""
+
+# Ranges for worker features (min, max). All values are normalised to [0, 1]
+# before entering the learning model.
 WORKER_FEATURE_VALUES_RANGE = {
-    "driving_speed": (0.0, 40.0),       # 0-40 m/s (~0-144 km/h) 最大行驶速度
-    "bandwidth": (0.0, 1000.0),         # 0-1000 Mbps 当前链路带宽
-    "processor_performance": (1.0, 5.0),# 1-5 GHz CPU 性能
-    "physical_distance": (0.0, 1000.0), # 0-1000 m 与任务站点的距离
-    "task_type": (0, 9),                # 任务类型编号范围
-    "data_size": (0.0, 5000.0),         # 0-5000 MB 数据量
-    "weather": (0, 4)                   # 天气等级 0-4，越大越恶劣
+    "driving_speed": (0.0, 40.0),        # m/s
+    "bandwidth": (0.0, 1000.0),          # Mbps
+    "processor_performance": (1.0, 5.0), # GHz
+    "physical_distance": (0.0, 1000.0),  # metres
+    "task_type": (0, 9),
+    "data_size": (0.0, 5000.0),          # MB
+    "weather": (0, 4),
 }
 
-# 全局随机种子
+# Reproducibility
 RANDOM_SEED = 43
 
-# 工人动态：默认关闭（静态环境）
+# Worker arrival/departure dynamics
 WORKER_DYNAMICS = {
     "leave_prob": 0.03,
     "join_prob": 0.15,
@@ -23,29 +26,22 @@ WORKER_DYNAMICS = {
         "processor_performance": 0.02,
         "physical_distance": 0.05,
     },
-    "weather_change_prob": 0.03
+    "weather_change_prob": 0.03,
 }
 
-# 目标保持工人数量的大致区间（仅在启用动态时使用）
+# Target worker pool size (used when dynamics are enabled)
 WORKER_COUNT_MIN = 8
 WORKER_COUNT_MAX = 12
 
-# 根节点到子节点的先验复制强度
-LAMBDA_PRIOR = 0.5
-PRIOR_CAP = 10
-
+# Partition control
 MAX_PARTITION_DEPTH = 64
-PARTITION_SPLIT_STRATEGY = 'longest'
-PARTITION_SPLIT_TOP_K = 1
 PARTITION_SPLIT_THRESHOLD = 10
+PARTITION_MIN_SAMPLES = 6            # minimum samples before split is considered
+PARTITION_VARIANCE_THRESHOLD = 0.005 # variance gate for splitting
 
-# Adaptive partition split control
-PARTITION_MIN_SAMPLES = 6             # 每个叶子至少采样 6 次后才允许细分
-PARTITION_VARIANCE_THRESHOLD = 0.005   # Beta 后验方差大于该值时才考虑继续细分
-
-# Baseline/Comparison experiment settings
+# Experiment settings
 RUN_COMPARISON = True
-COMPARISON_STEPS = 4000
+COMPARISON_STEPS = 8000
 COMPARISON_BATCH_SIZE = 10
 ARRIVALS_PER_STEP = (6, 16)
 ENABLE_WORKER_DYNAMICS_COMPARISON = True
@@ -53,15 +49,16 @@ ENABLE_WORKER_DYNAMICS_COMPARISON = True
 # Plot smoothing parameters
 LOSS_SMOOTH_WINDOW = 100
 
+# Assignment inspection snapshots
 ASSIGNMENT_INSPECTION_COUNT = 5
 ASSIGNMENT_INSPECTION_SEED = 1234
 ASSIGNMENT_INSPECTION_DIR = "assignment_inspections"
 ASSIGNMENT_INSPECTION_STEPS = None
 
+# Economic parameters
 REPLICATION_COST = 0.2
 
+# UCB behaviour for the replicator
 REPLICATOR_USE_UCB = True
 REPLICATOR_UCB_COEF = 0.3
 REPLICATOR_UCB_MIN_PULLS = 1
-REPLICATOR_PRIOR_MEAN = 0.6
-REPLICATOR_PRIOR_WEIGHT = 2.0

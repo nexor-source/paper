@@ -22,18 +22,9 @@ class ContextSpacePartition:
         self.estimated_quality = 0.0  # 该区域内任务副本的平均完成质量估计
         self.children = None    # 子划分列表，未细分时为None
 
-        # Hierarchical prior (inherit from parent); prior_weight does not affect split threshold
-        try:
-            _prior_mean_default = float(globals().get('REPLICATOR_PRIOR_MEAN', 0.5))
-        except Exception:
-            _prior_mean_default = 0.5
-        try:
-            _prior_weight_default = float(globals().get('REPLICATOR_PRIOR_WEIGHT', 0.0))
-        except Exception:
-            _prior_weight_default = 0.0
-        self.prior_mean = _prior_mean_default                 # default prior mean for Bernoulli rewards
-        self.prior_weight = max(0.0, _prior_weight_default)   # pseudo-count weight
+        self.default_mean = 0.5               # no-data fallback
         self.sum_reward = 0.0                 # cumulative reward stored in this partition
+        self.data_points = []                 # cached (context, reward) samples for adaptive splits
     
     def posterior_mean(self) -> float:
         """融合先验与真实样本的估计质量（后验均值）
@@ -41,10 +32,9 @@ class ContextSpacePartition:
         Returns:
             float: 当前分区的估计质量（先验均值与观测数据的加权平均）。
         """
-        total_w = self.prior_weight + self.sample_count
-        if total_w <= 0:
-            return self.prior_mean  # 没有任何信息时，退回先验均值
-        return (self.prior_mean * self.prior_weight + self.sum_reward) / total_w
+        if self.sample_count <= 0:
+            return self.default_mean  # 没有任何信息时，退回默认均值
+        return self.sum_reward / float(self.sample_count)
 
     def contains(self, context: np.ndarray) -> bool:
         """判断上下文是否在该划分区域内
@@ -60,7 +50,7 @@ class ContextSpacePartition:
                 abs(context[d] - self.bounds[d][1]) < EPS  # 允许等于上界
                 for d in range(len(context)))
 
-    def update_reward(self, reward: float, debug: bool = False):
+    def update_reward(self, reward: float, debug: bool = False, context: Optional[np.ndarray] = None):
         """根据观察到的副本完成奖励更新该区域的样本计数和平均质量估计
 
         Args:
@@ -69,13 +59,80 @@ class ContextSpacePartition:
         """
         if not debug:
             self.sample_count += 1
+            if context is not None:
+                try:
+                    ctx_tuple = tuple(float(x) for x in context)
+                except Exception:
+                    ctx_tuple = tuple(context)
+                self.data_points.append((ctx_tuple, float(reward)))
         self.sum_reward += reward
         # 仅作为一个“纯样本平均”的快速回显；真正用于决策请调用 posterior_mean()
         # self.estimated_quality = self.sum_reward / self.sample_count
         self.estimated_quality = self.posterior_mean()
     
+    def _binary_entropy(self, success: float, total: float) -> float:
+        if total <= 0.0:
+            return 0.0
+        p = success / total
+        if p <= 0.0 or p >= 1.0:
+            return 0.0
+        return float(-(p * math.log2(p) + (1.0 - p) * math.log2(1.0 - p)))
+
+    def _select_split_dimension(self) -> Tuple[Optional[int], Optional[float]]:
+        """选择信息增益最大的维度进行二分。"""
+        if not self.data_points:
+            return None, None
+
+        total_samples = float(len(self.data_points))
+        parent_entropy = self._binary_entropy(self.sum_reward, total_samples)
+        best_gain = float("-inf")
+        best_dim = None
+        best_mid = None
+
+        for dim, (lo, hi) in enumerate(self.bounds):
+            mid = (lo + hi) / 2.0
+            left_total = 0.0
+            right_total = 0.0
+            left_success = 0.0
+            right_success = 0.0
+
+            for ctx, reward in self.data_points:
+                value = ctx[dim]
+                if value < mid:
+                    left_total += 1.0
+                    left_success += reward
+                else:
+                    right_total += 1.0
+                    right_success += reward
+
+            if left_total == 0.0 or right_total == 0.0:
+                continue
+
+            total = left_total + right_total
+            if total <= 0.0:
+                continue
+
+            left_entropy = self._binary_entropy(left_success, left_total)
+            right_entropy = self._binary_entropy(right_success, right_total)
+            weighted_entropy = (left_total / total) * left_entropy + (right_total / total) * right_entropy
+            gain = parent_entropy - weighted_entropy
+            if gain > best_gain:
+                best_gain = gain
+                best_dim = dim
+                best_mid = mid
+
+        if best_dim is None:
+            widths = [b[1] - b[0] for b in self.bounds]
+            if not widths:
+                return None, None
+            best_dim = int(np.argmax(widths))
+            lo, hi = self.bounds[best_dim]
+            best_mid = (lo + hi) / 2.0
+
+        return best_dim, best_mid
+
     def subdivide(self):
-        """将该划分区域沿每个维度中点二分，产生 2^d 个子区域
+        """基于信息增益选择维度，将该划分区域二分生成两个子区域
 
         Notes:
             - 若该区域已被细分，则不再重复细分。
@@ -85,83 +142,40 @@ class ContextSpacePartition:
             # 如果这个partition已细分则不再细分
             print("Partition already subdivided.")
             return
-        
-        # 计算每个维度的中点
-        midpoints = [(b[0] + b[1]) / 2 for b in self.bounds]
-        new_bounds_list = []
 
-        # 选择要细分的维度（基于配置），默认沿所有维度细分
-        try:
-            strategy = PARTITION_SPLIT_STRATEGY
-        except NameError:
-            strategy = 'all'
-        widths = [b[1] - b[0] for b in self.bounds]
-        if strategy == 'all':
-            dims_to_split = list(range(len(self.bounds)))
-        elif strategy == 'longest':
-            if len(self.bounds) == 0:
-                return
-            dims_to_split = [int(np.argmax(widths))]
-        elif strategy == 'topk':
-            try:
-                k = int(PARTITION_SPLIT_TOP_K)
-            except Exception:
-                k = 1
-            k = max(0, min(k, len(self.bounds)))
-            if k == 0:
-                return
-            dims_sorted = list(np.argsort(widths))[::-1]
-            dims_to_split = [int(x) for x in dims_sorted[:k]]
-        else:
-            dims_to_split = list(range(len(self.bounds)))
-        k = len(dims_to_split)
-        if k == 0:
+        split_dim, split_value = self._select_split_dimension()
+        if split_dim is None or split_value is None:
+            # 无法找到合适的划分维度，放弃细分
             return
-        
-        # 遍历生成2^d个子划分的边界
-        for i in range(2 ** k):
-            new_bounds = []
-            # 每个新生成的划分的每个维度
-            for d in range(len(self.bounds)):
-                if d in dims_to_split:
-                    bit_index = dims_to_split.index(d)
-                    if ((i >> bit_index) & 1) == 0:
-                        new_bounds.append((self.bounds[d][0], midpoints[d]))
-                    else:
-                        new_bounds.append((midpoints[d], self.bounds[d][1]))
-                else:
-                    new_bounds.append(self.bounds[d])
-            new_bounds_list.append(new_bounds)
-        # 创建子划分对象列表
-        self.children = [ContextSpacePartition(b, self.depth + 1) for b in new_bounds_list]
 
-        # Seed children with the parent posterior plus optional global prior hints
-        parent_post = self.posterior_mean()
-        total_prior = LAMBDA_PRIOR * min(self.sample_count, PRIOR_CAP)  # inherited-strength cap
-        n_child = max(1, len(self.children))
-        per_child_prior = total_prior / n_child if total_prior > 0 else 0.0
+        left_bounds = list(self.bounds)
+        right_bounds = list(self.bounds)
+        left_bounds[split_dim] = (self.bounds[split_dim][0], split_value)
+        right_bounds[split_dim] = (split_value, self.bounds[split_dim][1])
 
-        try:
-            base_prior_mean = float(globals().get('REPLICATOR_PRIOR_MEAN', parent_post))
-        except Exception:
-            base_prior_mean = parent_post
-        try:
-            base_prior_weight = float(globals().get('REPLICATOR_PRIOR_WEIGHT', 0.0))
-        except Exception:
-            base_prior_weight = 0.0
+        left_child = ContextSpacePartition(left_bounds, self.depth + 1)
+        right_child = ContextSpacePartition(right_bounds, self.depth + 1)
+        self.children = [left_child, right_child]
+
+        left_child.data_points = []
+        right_child.data_points = []
+        left_child.sample_count = 0
+        right_child.sample_count = 0
+        left_child.sum_reward = 0.0
+        right_child.sum_reward = 0.0
+
+        for ctx, reward in self.data_points:
+            target = left_child if ctx[split_dim] < split_value else right_child
+            target.data_points.append((ctx, reward))
+            target.sample_count += 1
+            target.sum_reward += reward
+
         for child in self.children:
-            child.prior_mean = parent_post
-            child.prior_weight = per_child_prior
-            if base_prior_weight > 0.0:
-                combined_weight = child.prior_weight + base_prior_weight
-                if combined_weight > 0.0:
-                    child.prior_mean = (child.prior_mean * child.prior_weight + base_prior_mean * base_prior_weight) / combined_weight
-                    child.prior_weight = combined_weight
-            child.prior_weight = max(0.0, child.prior_weight)
-            child.update_reward(0, True)
-            # 重要：不继承 sample_count / sum_reward，避免“过度自信”
-            # child.sample_count = 0
-            # child.sum_reward  = 0.0
+            child.sum_reward = float(child.sum_reward)
+            child.estimated_quality = child.posterior_mean()
+
+        # 分裂后父节点不再向子节点传递额外先验
+        self.data_points = []
     
     def find_partition(self, context: np.ndarray):
         """递归寻找包含指定上下文的最底层划分区域（叶节点）
@@ -320,7 +334,7 @@ class TaskReplicator:
     def estimated_net(self, partition: ContextSpacePartition, include_ucb: bool = True) -> float:
         mean = float(partition.posterior_mean())
         if include_ucb and self.use_ucb:
-            pulls = float(partition.sample_count + partition.prior_weight)
+            pulls = float(max(partition.sample_count, 1.0))
             pulls = max(pulls, float(self.ucb_min_pulls))
             total = max(self.total_updates, 1)
             bonus = 0.0
@@ -336,21 +350,20 @@ class TaskReplicator:
         return self.estimated_net(partition, include_ucb=include_ucb)
 
     def _posterior_variance(self, partition: ContextSpacePartition) -> float:
-        """Compute Beta posterior variance for Bernoulli rewards with hierarchical prior."""
-        total_pulls = partition.prior_weight + partition.sample_count
-        # If no data at all, return high variance (force potential split once samples accumulate)
-        if total_pulls <= 0:
+        """Compute Beta posterior variance using observed rewards (no extra priors)."""
+        total = float(partition.sample_count)
+        if total <= 0.0:
             return 1.0
-        alpha = partition.prior_mean * partition.prior_weight + partition.sum_reward
-        beta_param = (1.0 - partition.prior_mean) * partition.prior_weight + partition.sample_count - partition.sum_reward
-        # guard against numerical issues
-        alpha = max(alpha, 1e-9)
-        beta_param = max(beta_param, 1e-9)
+        alpha = float(partition.sum_reward)
+        beta_param = total - alpha
+        eps = 1e-9
+        alpha = max(alpha, eps)
+        beta_param = max(beta_param, eps)
         denom = (alpha + beta_param) ** 2 * (alpha + beta_param + 1.0)
         if denom <= 0.0:
             return 0.0
         variance = (alpha * beta_param) / denom
-        return float(variance)
+        return float(max(variance, eps))
 
     def _should_split(self, partition: ContextSpacePartition) -> bool:
         """Decide whether to subdivide a partition based on variance & sample count."""
@@ -455,7 +468,7 @@ class TaskReplicator:
         for a in selected_assignments:
             p = self.root_partition.find_partition(a.context)
             reward = rewards.get(a, 0)
-            p.update_reward(reward)
+            p.update_reward(reward, context=a.context)
             self.total_updates += 1
             # 样本数达到阈值后进行二分细分（受最大层级限制）
             if self._should_split(p):

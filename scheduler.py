@@ -517,6 +517,10 @@ class Scheduler:
         alg_expected = self._expected_total_reward(selected_assignments)
         oracle_expected = self._expected_total_reward(oracle_assignments)
         step_loss = max(0.0, oracle_expected - alg_expected)
+        alg_count = len(selected_assignments)
+        oracle_count = len(oracle_assignments)
+        alg_avg_expected = float(alg_expected / alg_count) if alg_count > 0 else 0.0
+        oracle_avg_expected = float(oracle_expected / oracle_count) if oracle_count > 0 else 0.0
 
         pred_sel_sum = 0.0
         pred_sel_abs_sum = 0.0
@@ -580,7 +584,10 @@ class Scheduler:
             "realized_net": float(realized_net),
             "sel_workers": sorted({int(a.worker_id) for a in selected_assignments}),
             "sel_tasks": sorted({int(a.task_id) for a in selected_assignments}),
-            "assignment_count": len(selected_assignments),
+            "assignment_count": int(alg_count),
+            "oracle_assignment_count": int(oracle_count),
+            "expected_avg": float(alg_avg_expected),
+            "oracle_avg": float(oracle_avg_expected),
         }
         if pred_sel_count > 0:
             result["pred_error_sum"] = float(pred_sel_sum)
@@ -843,6 +850,7 @@ def run_experiment() -> None:
         if worker_timeline is not None:
             scheduler.enable_worker_dynamics = False
         loss_c, cum_c, cum_exp_c, assign_counts = [], [], [], []
+        avg_loss_series: List[float] = []
         pred_error_mean_series: List[float] = []
         pred_error_abs_series: List[float] = []
         cum = 0.0
@@ -880,6 +888,9 @@ def run_experiment() -> None:
             cum_exp += float(res.get("expected", 0.0))
             cum_exp_c.append(cum_exp)
             assign_counts.append(int(res.get("assignment_count", len(res.get("sel_tasks", [])))))
+            avg_alg = float(res.get("expected_avg", 0.0))
+            avg_orc = float(res.get("oracle_avg", 0.0))
+            avg_loss_series.append(float(avg_alg - avg_orc))
             pred_error_mean_series.append(float(res.get("pred_error_all_mean", res.get("pred_error_mean", np.nan))))
             pred_error_abs_series.append(float(res.get("pred_error_all_abs_mean", res.get("pred_error_abs_mean", np.nan))))
             if "pred_error_count" in res:
@@ -924,7 +935,7 @@ def run_experiment() -> None:
                 avg_abs_err_sel,
                 int(pred_error_sel_count),
             ))
-        return loss_c, cum_c, cum_exp_c, assign_counts, pred_error_mean_series, pred_error_abs_series, split_events
+        return loss_c, cum_c, cum_exp_c, assign_counts, pred_error_mean_series, pred_error_abs_series, avg_loss_series, split_events
 
     def run_with_selector(
         selector_factory,
@@ -933,7 +944,7 @@ def run_experiment() -> None:
         update_model: bool = False,
         use_oracle_eval: bool = True,
         predict_net_builder: Optional[Callable[["Scheduler", TaskReplicator], Callable[[Assignment], float]]] = None,
-    ) -> Tuple[List[float], List[float], List[float], List[int], List[float], List[float]]:
+    ) -> Tuple[List[float], List[float], List[float], List[int], List[float], List[float], List[float], int]:
         """Run a baseline selector (e.g. RandomBaseline/GreedyBaseline)."""
         workers = _clone_workers(base_workers)
         replicator = TaskReplicator(
@@ -953,6 +964,7 @@ def run_experiment() -> None:
             scheduler.enable_worker_dynamics = False
         selector = selector_factory(replicator)
         loss_c, cum_c, cum_exp_c, assign_counts = [], [], [], []
+        avg_loss_series: List[float] = []
         pred_error_mean_series: List[float] = []
         pred_error_abs_series: List[float] = []
         cum = 0.0
@@ -992,6 +1004,9 @@ def run_experiment() -> None:
             cum_exp += float(res.get("expected", 0.0))
             cum_exp_c.append(cum_exp)
             assign_counts.append(int(res.get("assignment_count", len(res.get("sel_tasks", [])))))
+            avg_alg = float(res.get("expected_avg", 0.0))
+            avg_orc = float(res.get("oracle_avg", 0.0))
+            avg_loss_series.append(float(avg_alg - avg_orc))
             pred_error_mean_series.append(float(res.get("pred_error_all_mean", res.get("pred_error_mean", np.nan))))
             pred_error_abs_series.append(float(res.get("pred_error_all_abs_mean", res.get("pred_error_abs_mean", np.nan))))
             if track_pred_error and "pred_error_count" in res:
@@ -1024,16 +1039,16 @@ def run_experiment() -> None:
             avg_abs_err_sel,
             int(pred_error_sel_count),
         ))
-        return loss_c, cum_c, cum_exp_c, assign_counts, pred_error_mean_series, pred_error_abs_series, split_events
+        return loss_c, cum_c, cum_exp_c, assign_counts, pred_error_mean_series, pred_error_abs_series, avg_loss_series, split_events
 
     # Baselines
-    loss_r, cum_r, cum_er, assign_r, _pred_err_r, _pred_err_abs_r, _split_r = run_with_selector(
+    loss_r, cum_r, cum_er, assign_r, _pred_err_r, _pred_err_abs_r, avg_loss_r, _split_r = run_with_selector(
         lambda _rep: RandomBaseline().select,
         method_label="Random",
         update_model=False,
         use_oracle_eval=False,
     )
-    loss_g, cum_g, cum_eg, assign_g, pred_err_g, pred_err_abs_g, split_g = run_with_selector(
+    loss_g, cum_g, cum_eg, assign_g, pred_err_g, pred_err_abs_g, avg_loss_g, split_g = run_with_selector(
         lambda rep: GreedyBaseline(rep).select,
         method_label="Greedy",
         update_model=True,
@@ -1045,7 +1060,7 @@ def run_experiment() -> None:
         ),
     )
     # Oracle policy (for cumulative reward plot)
-    def run_oracle() -> Tuple[List[float], List[float], List[int]]:
+    def run_oracle() -> Tuple[List[float], List[float], List[float], List[int], List[float], int]:
         """Oracle（带虚拟节点，允许不匹配）用于提供上界参考。
 
         使用真实成功概率评估净收益，不进行学习更新，理论上本策略的 loss 约为 0。
@@ -1068,6 +1083,7 @@ def run_experiment() -> None:
         if worker_timeline is not None:
             scheduler.enable_worker_dynamics = False
         loss_c, cum_c, cum_exp_c, assign_counts = [], [], [], []
+        avg_loss_series: List[float] = []
         cum = 0.0
         cum_exp = 0.0
         np.random.seed(RANDOM_SEED)
@@ -1092,14 +1108,17 @@ def run_experiment() -> None:
             cum_exp += float(res.get("oracle", 0.0))
             cum_exp_c.append(cum_exp)
             assign_counts.append(int(res.get("assignment_count", len(res.get("sel_tasks", [])))))
+            avg_alg = float(res.get("expected_avg", 0.0))
+            avg_orc = float(res.get("oracle_avg", 0.0))
+            avg_loss_series.append(float(avg_alg - avg_orc))
             if collect_details:
                 payload = res.get("inspection")
                 _maybe_render_inspection("Oracle", s, scheduler, predict_net, payload)
         split_events = replicator.split_events
-        return loss_c, cum_c, cum_exp_c, assign_counts, split_events
+        return loss_c, cum_c, cum_exp_c, assign_counts, avg_loss_series, split_events
 
-    loss_o, cum_o, cum_eo, assign_o, pred_err_o, pred_err_abs_o, split_o = run_original()
-    loss_orc, cum_orc, cum_eorc, assign_orc, split_orc = run_oracle()
+    loss_o, cum_o, cum_eo, assign_o, pred_err_o, pred_err_abs_o, avg_loss_o, split_o = run_original()
+    loss_orc, cum_orc, cum_eorc, assign_orc, avg_loss_orc, split_orc = run_oracle()
 
     print("[partition-splits] Ours   :", int(split_o))
     print("[partition-splits] Greedy :", int(split_g))
@@ -1181,6 +1200,49 @@ def run_experiment() -> None:
     plt.savefig("output/compare_loss_smooth.png", dpi=150)
     plt.close()
 
+    # Average loss per assignment (raw)
+    plt.figure(figsize=(9, 4))
+    plt.plot(avg_loss_o, label="Ours", linewidth=1.0, alpha=0.7)
+    plt.plot(avg_loss_r, label="Random", linewidth=1.0, alpha=0.7)
+    plt.plot(avg_loss_g, label="Greedy", linewidth=1.0, alpha=0.7)
+    plt.axhline(0.0, color='k', linestyle='--', linewidth=0.8, alpha=0.4)
+    plt.title("Average Loss per Assignment (raw)")
+    plt.xlabel("Step")
+    plt.ylabel("Avg loss (method - oracle)")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("output/compare_avg_loss.png", dpi=150)
+    plt.close()
+
+    # Smoothed average loss
+    xo_avg, mo_avg, lo_avg_b, hi_avg_b = _prep(avg_loss_o)
+    xr_avg, mr_avg, lr_avg_b, hr_avg_b = _prep(avg_loss_r)
+    xg_avg, mg_avg, lg_avg_b, hg_avg_b = _prep(avg_loss_g)
+
+    plt.figure(figsize=(9, 4))
+    if lo_avg_b is not None and hi_avg_b is not None:
+        plt.fill_between(xo_avg, lo_avg_b, hi_avg_b, color='C0', alpha=0.12)
+    plt.plot(xo_avg, mo_avg, label="Ours (mean)", color='C0', linewidth=2.0)
+
+    if lr_avg_b is not None and hr_avg_b is not None:
+        plt.fill_between(xr_avg, lr_avg_b, hr_avg_b, color='C1', alpha=0.12)
+    plt.plot(xr_avg, mr_avg, label="Random (mean)", color='C1', linewidth=2.0)
+
+    if lg_avg_b is not None and hg_avg_b is not None:
+        plt.fill_between(xg_avg, lg_avg_b, hg_avg_b, color='C2', alpha=0.12)
+    plt.plot(xg_avg, mg_avg, label="Greedy (mean)", color='C2', linewidth=2.0)
+
+    plt.axhline(0.0, color='k', linestyle='--', linewidth=0.8, alpha=0.4)
+    plt.title(f"Average Loss per Assignment (rolling mean, window={smooth_win})")
+    plt.xlabel("Step (offset by window)")
+    plt.ylabel("Avg loss (method - oracle)")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("output/compare_avg_loss_smooth.png", dpi=150)
+    plt.close()
+
     err_o = np.asarray(pred_err_o, dtype=float)
     err_g = np.asarray(pred_err_g, dtype=float)
     err_abs_o = np.asarray(pred_err_abs_o, dtype=float)
@@ -1249,6 +1311,35 @@ def run_experiment() -> None:
     plt.savefig("output/compare_cum_reward.png", dpi=150)
     plt.close()
 
+    def _cumulative_regret(method_cum, oracle_cum):
+        method_arr = np.asarray(method_cum, dtype=float)
+        oracle_arr = np.asarray(oracle_cum, dtype=float)
+        if method_arr.size == 0 or oracle_arr.size == 0:
+            return np.asarray([])
+        n = min(method_arr.size, oracle_arr.size)
+        return oracle_arr[:n] - method_arr[:n]
+
+    regret_o = _cumulative_regret(cum_o, cum_orc)
+    regret_r = _cumulative_regret(cum_r, cum_orc)
+    regret_g = _cumulative_regret(cum_g, cum_orc)
+
+    if regret_o.size > 0:
+        plt.figure(figsize=(9, 4))
+        plt.plot(np.arange(len(regret_o)), regret_o, label="Ours", linewidth=1.6)
+        if regret_r.size > 0:
+            plt.plot(np.arange(len(regret_r)), regret_r, label="Random", linewidth=1.0, alpha=0.85)
+        if regret_g.size > 0:
+            plt.plot(np.arange(len(regret_g)), regret_g, label="Greedy", linewidth=1.0, alpha=0.85)
+        plt.axhline(0.0, color="k", linestyle="--", linewidth=0.8, alpha=0.4)
+        plt.title("Cumulative Regret (Oracle - Realized Method Reward)")
+        plt.xlabel("Step")
+        plt.ylabel("Cumulative Regret")
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig("output/compare_cum_regret.png", dpi=150)
+        plt.close()
+
     # New: Expected cumulative net reward (sum of expected net per step)
     plt.figure(figsize=(9, 4))
     # 使用不同的线型，避免重叠时“看成三条线”的错觉
@@ -1264,6 +1355,27 @@ def run_experiment() -> None:
     plt.tight_layout()
     plt.savefig("output/compare_cum_expected.png", dpi=150)
     plt.close()
+
+    regret_eo = _cumulative_regret(cum_eo, cum_eorc)
+    regret_er = _cumulative_regret(cum_er, cum_eorc)
+    regret_eg = _cumulative_regret(cum_eg, cum_eorc)
+
+    if regret_eo.size > 0:
+        plt.figure(figsize=(9, 4))
+        plt.plot(np.arange(len(regret_eo)), regret_eo, label="Ours", color='C0', linewidth=2.0, alpha=0.9)
+        if regret_er.size > 0:
+            plt.plot(np.arange(len(regret_er)), regret_er, label="Random", color='C1', linestyle='--', linewidth=1.6, alpha=0.9)
+        if regret_eg.size > 0:
+            plt.plot(np.arange(len(regret_eg)), regret_eg, label="Greedy", color='C2', linestyle='-.', linewidth=1.6, alpha=0.9)
+        plt.axhline(0.0, color="k", linestyle="--", linewidth=0.8, alpha=0.4)
+        plt.title("Cumulative Expected Regret")
+        plt.xlabel("Step")
+        plt.ylabel("Cumulative Expected Regret")
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig("output/compare_cum_expected_regret.png", dpi=150)
+        plt.close()
 
     # Print average expected net per selected assignment to help tune REPLICATION_COST
     def _avg_expected(cum_e_seq, assign_seq):

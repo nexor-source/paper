@@ -719,13 +719,6 @@ def run_experiment() -> None:
 
     # 基础工人集
     base_workers: List[Worker] = []
-    # base_workers: List[Worker] = [
-    #     # 固定的三个样例工人
-    #     # id, speed, bw, cpu, distance, weather
-    #     Worker(0, 25, 800, 3.0, 250, 1),
-    #     Worker(1, 40, 400, 3.5, 300, 2),
-    #     Worker(2, 5, 150, 2.5, 100, 0),
-    # ]
 
     for i in range(3, 50):
         base_workers.append(spawn_new_worker(i))

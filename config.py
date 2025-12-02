@@ -46,6 +46,13 @@ COMPARISON_BATCH_SIZE = 10
 ARRIVALS_PER_STEP = (6, 16)
 ENABLE_WORKER_DYNAMICS_COMPARISON = True
 
+# Delayed feedback settings
+# When enabled, rewards are applied after a sampled delay (in steps) instead of immediately.
+ENABLE_DELAYED_FEEDBACK = False
+FEEDBACK_DELAY_RANGE = (1, 5)   # inclusive, in scheduling steps
+FEEDBACK_DROP_PROB = 0.0        # optional drop probability for feedback
+RUN_DELAYED_FEEDBACK_VARIANT = True  # run both immediate and delayed variants for comparison plots
+
 # Plot smoothing parameters
 LOSS_SMOOTH_WINDOW = 100
 

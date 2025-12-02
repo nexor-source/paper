@@ -383,7 +383,7 @@ class TaskReplicator:
         return True
 
     # 覆盖式统一接口：允许通过参数控制是否可不匹配
-    def select_assignments(self, candidate_assignments: List[Assignment], allow_unmatch: bool = True):
+    def select_assignments(self, candidate_assignments: List[Assignment], allow_unmatch: bool = True, use_ucb: bool = True):
         """选择工-任务匹配（允许通过参数控制是否可不匹配）。
 
         - allow_unmatch=True：允许任务或工人不匹配（虚拟节点成本0）；
@@ -404,7 +404,9 @@ class TaskReplicator:
         for a in candidate_assignments:
             i, j = task_idx[a.task_id], worker_idx[a.worker_id]
             partition = self.root_partition.find_partition(a.context)
-            net = self.estimated_net(partition, include_ucb=True)
+
+            net = self.estimated_net(partition, include_ucb=use_ucb)
+            
             profits[i, j] = net
             pair2a[(a.task_id, a.worker_id)] = a
 

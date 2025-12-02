@@ -4,7 +4,6 @@ from collections import deque
 from typing import List, Dict, Callable, Tuple, Optional
 from matching_utils import run_hungarian_matching
 
-# 你之前定义的 ContextNormalizer, Assignment, TaskReplicator 类这里省略，假设已经实现并导入
 from normalizer import ContextNormalizer
 from task_replicator import Assignment, TaskReplicator
 from visualizer import PartitionVisualizer, render_assignment_matrix
@@ -161,6 +160,9 @@ class Scheduler:
         context_normalizer: ContextNormalizer,
         replicator: TaskReplicator,
         enable_worker_dynamics: bool = True,
+        enable_delayed_feedback: Optional[bool] = None,
+        feedback_delay_range: Optional[Tuple[int, int]] = None,
+        feedback_drop_prob: Optional[float] = None,
     ):
         """初始化调度器
 
@@ -178,6 +180,19 @@ class Scheduler:
         self.enable_worker_dynamics = enable_worker_dynamics
         self.task_queue = TaskQueue()
         self.time = 0  # 模拟时间步
+        cfg_enable_delay = bool(globals().get("ENABLE_DELAYED_FEEDBACK", False))
+        self.enable_delayed_feedback = cfg_enable_delay if enable_delayed_feedback is None else bool(enable_delayed_feedback)
+        cfg_delay_range = globals().get("FEEDBACK_DELAY_RANGE", (0, 0))
+        if feedback_delay_range is None:
+            if isinstance(cfg_delay_range, (list, tuple)) and len(cfg_delay_range) >= 2:
+                self.feedback_delay_range = (int(cfg_delay_range[0]), int(cfg_delay_range[1]))
+            else:
+                self.feedback_delay_range = (0, 0)
+        else:
+            self.feedback_delay_range = (int(feedback_delay_range[0]), int(feedback_delay_range[1]))
+        cfg_drop = float(globals().get("FEEDBACK_DROP_PROB", 0.0))
+        self.feedback_drop_prob = float(cfg_drop if feedback_drop_prob is None else feedback_drop_prob)
+        self.pending_feedback: List[Tuple[int, List[Assignment], Dict[Assignment, float]]] = []
 
     def generate_candidate_assignments(self, tasks: List[Task]) -> List[Assignment]:
         """根据任务与工人生成候选的工人-任务对
@@ -209,6 +224,42 @@ class Scheduler:
                 assignment = Assignment(worker.worker_id, task.task_id, norm_context)
                 candidates.append(assignment)
         return candidates
+
+    def _sample_feedback_delay(self) -> int:
+        """Sample a feedback delay (in steps) when delayed feedback is enabled."""
+        if not self.enable_delayed_feedback:
+            return 0
+        lo, hi = self.feedback_delay_range
+        try:
+            return int(np.random.randint(int(lo), int(hi) + 1))
+        except Exception:
+            return 0
+
+    def _flush_pending_feedback(self) -> Tuple[int, int]:
+        """Apply any feedback items whose ready_time <= current time."""
+        if not self.pending_feedback:
+            return 0, 0
+        ready: List[Tuple[int, List[Assignment], Dict[Assignment, float]]] = []
+        still_pending: List[Tuple[int, List[Assignment], Dict[Assignment, float]]] = []
+        for item in self.pending_feedback:
+            ready_time, assignments, rewards = item
+            if ready_time <= self.time:
+                ready.append(item)
+            else:
+                still_pending.append(item)
+        self.pending_feedback = still_pending
+        if not ready:
+            return 0, 0
+
+        merged_rewards: Dict[Assignment, float] = {}
+        merged_assignments: List[Assignment] = []
+        for _ready_time, assignments, rewards in ready:
+            merged_assignments.extend(assignments)
+            for a, r in rewards.items():
+                merged_rewards[a] = r
+        if merged_assignments:
+            self.replicator.update_assignments_reward(merged_assignments, merged_rewards)
+        return len(merged_assignments), len(ready)
 
     def _oracle_select_assignments(self, candidate_assignments: List[Assignment]) -> List[Assignment]:
         """Oracle 版本（允许不匹配）——最小化版：
@@ -487,6 +538,7 @@ class Scheduler:
     ) -> Dict[str, float]:
         """通用一步：自定义 selector 进行分配，可选更新模型，返回指标。"""
         # 1. 新任务 new_tasks 入队
+        flushed_assignments, flushed_batches = self._flush_pending_feedback()
         for task in new_tasks:
             self.task_queue.add_task(task.task_type, task.data_size, task.deadline)
 
@@ -494,7 +546,15 @@ class Scheduler:
         tasks_to_schedule = self.task_queue.get_tasks_batch(batch_size)
         if not tasks_to_schedule:
             self.time += 1
-            return {"loss": 0.0, "expected": 0.0, "oracle": 0.0, "realized_net": 0.0}
+            return {
+                "loss": 0.0,
+                "expected": 0.0,
+                "oracle": 0.0,
+                "realized_net": 0.0,
+                "pending_feedback": len(self.pending_feedback),
+                "flushed_feedback": int(flushed_assignments),
+                "flushed_batches": int(flushed_batches),
+            }
 
         # 2.5 工人动态（可开关）
         if getattr(self, "enable_worker_dynamics", True):
@@ -568,7 +628,27 @@ class Scheduler:
 
         # 6. 可选模型更新
         if update_model and selected_assignments:
-            self.replicator.update_assignments_reward(selected_assignments, rewards)
+            assignments_for_update = list(selected_assignments)
+            rewards_for_update = dict(rewards)
+            if self.enable_delayed_feedback:
+                if self.feedback_drop_prob > 0.0:
+                    kept_assignments: List[Assignment] = []
+                    for a in assignments_for_update:
+                        if np.random.random() < self.feedback_drop_prob:
+                            continue
+                        kept_assignments.append(a)
+                    assignments_for_update = kept_assignments
+                    rewards_for_update = {a: rewards_for_update[a] for a in assignments_for_update}
+                if assignments_for_update:
+                    delay_steps = self._sample_feedback_delay()
+                    if delay_steps <= 0:
+                        self.replicator.update_assignments_reward(assignments_for_update, rewards_for_update)
+                    else:
+                        self.pending_feedback.append(
+                            (self.time + int(delay_steps), assignments_for_update, rewards_for_update)
+                        )
+            else:
+                self.replicator.update_assignments_reward(assignments_for_update, rewards_for_update)
 
         self.time += 1
         inspection_payload = None
@@ -589,6 +669,9 @@ class Scheduler:
             "expected_avg": float(alg_avg_expected),
             "oracle_avg": float(oracle_avg_expected),
         }
+        result["pending_feedback"] = len(self.pending_feedback)
+        result["flushed_feedback"] = int(flushed_assignments)
+        result["flushed_batches"] = int(flushed_batches)
         if pred_sel_count > 0:
             result["pred_error_sum"] = float(pred_sel_sum)
             result["pred_error_abs_sum"] = float(pred_sel_abs_sum)
@@ -825,7 +908,8 @@ def run_experiment() -> None:
     from baselines import RandomBaseline, GreedyBaseline
     import matplotlib.pyplot as plt
 
-    def run_original() -> Tuple[List[float], List[float], List[float], List[int], List[float], List[float]]:
+    def run_original(method_label: str = "Ours", enable_delay: Optional[bool] = None) -> Tuple[List[float], List[float], List[float], List[int], List[float], List[float], List[float], int, List[int], List[int]]:
+        """Run the main method; enable_delay overrides config when set."""
         workers = _clone_workers(base_workers)
         replicator = TaskReplicator(
             context_dim=7,
@@ -834,11 +918,13 @@ def run_experiment() -> None:
             replication_cost=REPLICATION_COST,
             max_partition_depth=MAX_PARTITION_DEPTH,
         )
+        enable_delay_flag = bool(globals().get("ENABLE_DELAYED_FEEDBACK", False)) if enable_delay is None else bool(enable_delay)
         scheduler = Scheduler(
             workers,
             normalizer,
             replicator,
             enable_worker_dynamics=bool(globals().get("ENABLE_WORKER_DYNAMICS_COMPARISON", False)),
+            enable_delayed_feedback=enable_delay_flag,
         )
         if worker_timeline is not None:
             scheduler.enable_worker_dynamics = False
@@ -846,6 +932,8 @@ def run_experiment() -> None:
         avg_loss_series: List[float] = []
         pred_error_mean_series: List[float] = []
         pred_error_abs_series: List[float] = []
+        pending_series: List[int] = []
+        flushed_series: List[int] = []
         cum = 0.0
         cum_exp = 0.0
         pred_error_sel_sum = 0.0
@@ -870,7 +958,7 @@ def run_experiment() -> None:
             res = scheduler.step_with_selector(
                 task_stream[s],
                 batch_size,
-                lambda cands, _e: scheduler.replicator.select_assignments(cands, allow_unmatch=True),
+                lambda cands, _e: scheduler.replicator.select_assignments(cands, allow_unmatch=True, use_ucb=True),
                 update_model=True,
                 predict_net_fn=predict_net,
                 collect_details=collect_details,
@@ -886,6 +974,8 @@ def run_experiment() -> None:
             avg_loss_series.append(float(avg_alg - avg_orc))
             pred_error_mean_series.append(float(res.get("pred_error_all_mean", res.get("pred_error_mean", np.nan))))
             pred_error_abs_series.append(float(res.get("pred_error_all_abs_mean", res.get("pred_error_abs_mean", np.nan))))
+            pending_series.append(int(res.get("pending_feedback", 0)))
+            flushed_series.append(int(res.get("flushed_feedback", 0)))
             if "pred_error_count" in res:
                 pred_error_sel_sum += float(res.get("pred_error_sum", 0.0))
                 pred_error_sel_abs_sum += float(res.get("pred_error_abs_sum", 0.0))
@@ -896,7 +986,7 @@ def run_experiment() -> None:
                 pred_error_all_count += float(res.get("pred_error_all_count", 0.0))
             if collect_details:
                 payload = res.get("inspection")
-                _maybe_render_inspection("Ours", s, scheduler, predict_net, payload)
+                _maybe_render_inspection(method_label, s, scheduler, predict_net, payload)
             if s % 50 == 0:
                 try:
                     visualizer = PartitionVisualizer(replicator.partitions)
@@ -915,7 +1005,8 @@ def run_experiment() -> None:
         if pred_error_all_count > 0:
             avg_err_all = float(pred_error_all_sum / pred_error_all_count)
             avg_abs_err_all = float(pred_error_all_abs_sum / pred_error_all_count)
-            print("[prediction-bias][Ours][all] mean={:.4f}, mean_abs={:.4f}, samples={}".format(
+            print("[prediction-bias][{}][all] mean={:.4f}, mean_abs={:.4f}, samples={}".format(
+                method_label,
                 avg_err_all,
                 avg_abs_err_all,
                 int(pred_error_all_count),
@@ -923,12 +1014,24 @@ def run_experiment() -> None:
         if pred_error_sel_count > 0:
             avg_err_sel = float(pred_error_sel_sum / pred_error_sel_count)
             avg_abs_err_sel = float(pred_error_sel_abs_sum / pred_error_sel_count)
-            print("[prediction-bias][Ours][selected] mean={:.4f}, mean_abs={:.4f}, samples={}".format(
+            print("[prediction-bias][{}][selected] mean={:.4f}, mean_abs={:.4f}, samples={}".format(
+                method_label,
                 avg_err_sel,
                 avg_abs_err_sel,
                 int(pred_error_sel_count),
             ))
-        return loss_c, cum_c, cum_exp_c, assign_counts, pred_error_mean_series, pred_error_abs_series, avg_loss_series, split_events
+        return (
+            loss_c,
+            cum_c,
+            cum_exp_c,
+            assign_counts,
+            pred_error_mean_series,
+            pred_error_abs_series,
+            avg_loss_series,
+            split_events,
+            pending_series,
+            flushed_series,
+        )
 
     def run_with_selector(
         selector_factory,
@@ -1042,14 +1145,14 @@ def run_experiment() -> None:
         use_oracle_eval=False,
     )
     loss_g, cum_g, cum_eg, assign_g, pred_err_g, pred_err_abs_g, avg_loss_g, split_g = run_with_selector(
-        lambda rep: GreedyBaseline(rep).select,
+        # 传入一个 lambda，调用 rep.select_assignments 并设置 use_ucb=False
+        lambda rep: lambda cands, _e: rep.select_assignments(cands, allow_unmatch=True, use_ucb=False),
         method_label="Greedy",
         update_model=True,
         use_oracle_eval=False,
+        # 确保预测值也不带 UCB
         predict_net_builder=lambda sched, rep: (
-            (lambda a: float(rep.assignment_net(a, include_ucb=False)))
-            if hasattr(rep, 'assignment_net')
-            else (lambda a: float(rep.root_partition.find_partition(a.context).posterior_mean() - rep.replication_cost))
+            lambda a: float(rep.assignment_net(a, include_ucb=False)) # 这里的预测已经是不带UCB的了
         ),
     )
     # Oracle policy (for cumulative reward plot)
@@ -1110,17 +1213,48 @@ def run_experiment() -> None:
         split_events = replicator.split_events
         return loss_c, cum_c, cum_exp_c, assign_counts, avg_loss_series, split_events
 
-    loss_o, cum_o, cum_eo, assign_o, pred_err_o, pred_err_abs_o, avg_loss_o, split_o = run_original()
+    run_delayed_variant = bool(globals().get("RUN_DELAYED_FEEDBACK_VARIANT", True))
+    loss_o, cum_o, cum_eo, assign_o, pred_err_o, pred_err_abs_o, avg_loss_o, split_o, pending_o, flushed_o = run_original(
+        method_label="Ours-Immediate",
+        enable_delay=False,
+    )
+    loss_od: List[float] = []
+    cum_od: List[float] = []
+    cum_eod: List[float] = []
+    assign_od: List[int] = []
+    pred_err_od: List[float] = []
+    pred_err_abs_od: List[float] = []
+    avg_loss_od: List[float] = []
+    split_od = 0
+    pending_od: List[int] = []
+    flushed_od: List[int] = []
+    if run_delayed_variant:
+        (
+            loss_od,
+            cum_od,
+            cum_eod,
+            assign_od,
+            pred_err_od,
+            pred_err_abs_od,
+            avg_loss_od,
+            split_od,
+            pending_od,
+            flushed_od,
+        ) = run_original(method_label="Ours-Delayed", enable_delay=True)
     loss_orc, cum_orc, cum_eorc, assign_orc, avg_loss_orc, split_orc = run_oracle()
 
-    print("[partition-splits] Ours   :", int(split_o))
+    print("[partition-splits] Ours-Immediate:", int(split_o))
+    if run_delayed_variant:
+        print("[partition-splits] Ours-Delayed :", int(split_od))
     print("[partition-splits] Greedy :", int(split_g))
     print("[partition-splits] Oracle :", int(split_orc))
 
     # (debug prints removed)
 
     plt.figure(figsize=(9, 4))
-    plt.plot(loss_o, label="Ours", linewidth=1.0, alpha=0.7)
+    plt.plot(loss_o, label="Ours-Immediate", linewidth=1.0, alpha=0.7)
+    if run_delayed_variant and loss_od:
+        plt.plot(loss_od, label="Ours-Delayed", linewidth=1.0, alpha=0.7)
     plt.plot(loss_r, label="Random", linewidth=1.0, alpha=0.7)
     plt.plot(loss_g, label="Greedy", linewidth=1.0, alpha=0.7)
     plt.title("Loss Comparison (raw)")
@@ -1170,11 +1304,18 @@ def run_experiment() -> None:
     xo, mo, lo_b, hi_b = _prep(loss_o)
     xr, mr, lr_b, hr_b = _prep(loss_r)
     xg, mg, lg_b, hg_b = _prep(loss_g)
+    xod = mod = lod_b = hid_b = None
+    if run_delayed_variant and loss_od:
+        xod, mod, lod_b, hid_b = _prep(loss_od)
 
     plt.figure(figsize=(9, 4))
     if lo_b is not None and hi_b is not None:
         plt.fill_between(xo, lo_b, hi_b, color='C0', alpha=0.12)
-    plt.plot(xo, mo, label="Ours (mean)", color='C0', linewidth=2.0)
+    plt.plot(xo, mo, label="Ours-Immediate (mean)", color='C0', linewidth=2.0)
+    if run_delayed_variant and mod is not None and lod_b is not None and hid_b is not None:
+        plt.fill_between(xod, lod_b, hid_b, color='C4', alpha=0.12)
+    if run_delayed_variant and mod is not None:
+        plt.plot(xod, mod, label="Ours-Delayed (mean)", color='C4', linewidth=2.0)
 
     if lr_b is not None and hr_b is not None:
         plt.fill_between(xr, lr_b, hr_b, color='C1', alpha=0.12)
@@ -1195,7 +1336,9 @@ def run_experiment() -> None:
 
     # Average loss per assignment (raw)
     plt.figure(figsize=(9, 4))
-    plt.plot(avg_loss_o, label="Ours", linewidth=1.0, alpha=0.7)
+    plt.plot(avg_loss_o, label="Ours-Immediate", linewidth=1.0, alpha=0.7)
+    if run_delayed_variant and avg_loss_od:
+        plt.plot(avg_loss_od, label="Ours-Delayed", linewidth=1.0, alpha=0.7)
     plt.plot(avg_loss_r, label="Random", linewidth=1.0, alpha=0.7)
     plt.plot(avg_loss_g, label="Greedy", linewidth=1.0, alpha=0.7)
     plt.axhline(0.0, color='k', linestyle='--', linewidth=0.8, alpha=0.4)
@@ -1212,11 +1355,18 @@ def run_experiment() -> None:
     xo_avg, mo_avg, lo_avg_b, hi_avg_b = _prep(avg_loss_o)
     xr_avg, mr_avg, lr_avg_b, hr_avg_b = _prep(avg_loss_r)
     xg_avg, mg_avg, lg_avg_b, hg_avg_b = _prep(avg_loss_g)
+    xod_avg = mod_avg = lod_avg_b = hid_avg_b = None
+    if run_delayed_variant and avg_loss_od:
+        xod_avg, mod_avg, lod_avg_b, hid_avg_b = _prep(avg_loss_od)
 
     plt.figure(figsize=(9, 4))
     if lo_avg_b is not None and hi_avg_b is not None:
         plt.fill_between(xo_avg, lo_avg_b, hi_avg_b, color='C0', alpha=0.12)
-    plt.plot(xo_avg, mo_avg, label="Ours (mean)", color='C0', linewidth=2.0)
+    plt.plot(xo_avg, mo_avg, label="Ours-Immediate (mean)", color='C0', linewidth=2.0)
+    if run_delayed_variant and mod_avg is not None and lod_avg_b is not None and hid_avg_b is not None:
+        plt.fill_between(xod_avg, lod_avg_b, hid_avg_b, color='C4', alpha=0.12)
+    if run_delayed_variant and mod_avg is not None:
+        plt.plot(xod_avg, mod_avg, label="Ours-Delayed (mean)", color='C4', linewidth=2.0)
 
     if lr_avg_b is not None and hr_avg_b is not None:
         plt.fill_between(xr_avg, lr_avg_b, hr_avg_b, color='C1', alpha=0.12)
@@ -1240,11 +1390,16 @@ def run_experiment() -> None:
     err_g = np.asarray(pred_err_g, dtype=float)
     err_abs_o = np.asarray(pred_err_abs_o, dtype=float)
     err_abs_g = np.asarray(pred_err_abs_g, dtype=float)
+    err_od = np.asarray(pred_err_od, dtype=float) if run_delayed_variant else np.asarray([])
+    err_abs_od = np.asarray(pred_err_abs_od, dtype=float) if run_delayed_variant else np.asarray([])
     steps_axis = np.arange(len(err_o))
     steps_axis_g = np.arange(len(err_g))
+    steps_axis_od = np.arange(len(err_od))
 
     plt.figure(figsize=(9, 4))
-    plt.plot(steps_axis, err_o, label="Ours", color='C0', linewidth=1.0, alpha=0.85)
+    plt.plot(steps_axis, err_o, label="Ours-Immediate", color='C0', linewidth=1.0, alpha=0.85)
+    if run_delayed_variant and err_od.size > 0:
+        plt.plot(steps_axis_od, err_od, label="Ours-Delayed", color='C4', linewidth=1.0, alpha=0.85)
     plt.plot(steps_axis_g, err_g, label="Greedy", color='C2', linewidth=1.0, alpha=0.85)
     plt.axhline(0.0, color='k', linestyle='--', linewidth=0.8, alpha=0.4)
     plt.title("Prediction Bias (Signed Error on Selected Assignments)")
@@ -1257,7 +1412,9 @@ def run_experiment() -> None:
     plt.close()
 
     plt.figure(figsize=(9, 4))
-    plt.plot(steps_axis, err_abs_o, label="Ours", color='C0', linewidth=1.0, alpha=0.85)
+    plt.plot(steps_axis, err_abs_o, label="Ours-Immediate", color='C0', linewidth=1.0, alpha=0.85)
+    if run_delayed_variant and err_abs_od.size > 0:
+        plt.plot(steps_axis_od, err_abs_od, label="Ours-Delayed", color='C4', linewidth=1.0, alpha=0.85)
     plt.plot(steps_axis_g, err_abs_g, label="Greedy", color='C2', linewidth=1.0, alpha=0.85)
     plt.title("Prediction Error Magnitude on Selected Assignments")
     plt.xlabel("Step")
@@ -1271,11 +1428,18 @@ def run_experiment() -> None:
     # Smoothed absolute prediction error with the same rolling window stats as loss
     x_abs_o, mean_abs_o, lo_abs_o, hi_abs_o = _prep(err_abs_o)
     x_abs_g, mean_abs_g, lo_abs_g, hi_abs_g = _prep(err_abs_g)
+    x_abs_od = mean_abs_od = lo_abs_od = hi_abs_od = None
+    if run_delayed_variant and err_abs_od.size > 0:
+        x_abs_od, mean_abs_od, lo_abs_od, hi_abs_od = _prep(err_abs_od)
 
     plt.figure(figsize=(9, 4))
     if lo_abs_o is not None and hi_abs_o is not None and len(lo_abs_o) > 0:
         plt.fill_between(x_abs_o, lo_abs_o, hi_abs_o, color='C0', alpha=0.12)
-    plt.plot(x_abs_o, mean_abs_o, label="Ours (mean)", color='C0', linewidth=2.0)
+    plt.plot(x_abs_o, mean_abs_o, label="Ours-Immediate (mean)", color='C0', linewidth=2.0)
+    if run_delayed_variant and lo_abs_od is not None and hi_abs_od is not None and len(lo_abs_od) > 0:
+        plt.fill_between(x_abs_od, lo_abs_od, hi_abs_od, color='C4', alpha=0.12)
+    if run_delayed_variant and mean_abs_od is not None:
+        plt.plot(x_abs_od, mean_abs_od, label="Ours-Delayed (mean)", color='C4', linewidth=2.0)
 
     if lo_abs_g is not None and hi_abs_g is not None and len(lo_abs_g) > 0:
         plt.fill_between(x_abs_g, lo_abs_g, hi_abs_g, color='C2', alpha=0.12)
@@ -1291,7 +1455,9 @@ def run_experiment() -> None:
     plt.close()
 
     plt.figure(figsize=(9, 4))
-    plt.plot(cum_o, label="Ours")
+    plt.plot(cum_o, label="Ours-Immediate")
+    if run_delayed_variant and cum_od:
+        plt.plot(cum_od, label="Ours-Delayed")
     plt.plot(cum_r, label="Random")
     plt.plot(cum_g, label="Greedy")
     plt.plot(cum_orc, label="Oracle")
@@ -1315,10 +1481,13 @@ def run_experiment() -> None:
     regret_o = _cumulative_regret(cum_o, cum_orc)
     regret_r = _cumulative_regret(cum_r, cum_orc)
     regret_g = _cumulative_regret(cum_g, cum_orc)
+    regret_od = _cumulative_regret(cum_od, cum_orc) if run_delayed_variant and cum_od else np.asarray([])
 
     if regret_o.size > 0:
         plt.figure(figsize=(9, 4))
-        plt.plot(np.arange(len(regret_o)), regret_o, label="Ours", linewidth=1.6)
+        plt.plot(np.arange(len(regret_o)), regret_o, label="Ours-Immediate", linewidth=1.6)
+        if regret_od.size > 0:
+            plt.plot(np.arange(len(regret_od)), regret_od, label="Ours-Delayed", linewidth=1.6, linestyle=':')
         if regret_r.size > 0:
             plt.plot(np.arange(len(regret_r)), regret_r, label="Random", linewidth=1.0, alpha=0.85)
         if regret_g.size > 0:
@@ -1336,7 +1505,9 @@ def run_experiment() -> None:
     # New: Expected cumulative net reward (sum of expected net per step)
     plt.figure(figsize=(9, 4))
     # 使用不同的线型，避免重叠时“看成三条线”的错觉
-    plt.plot(cum_eo, label="Ours", color='C0', linestyle='-', linewidth=2.0, alpha=0.95, zorder=3)
+    plt.plot(cum_eo, label="Ours-Immediate", color='C0', linestyle='-', linewidth=2.0, alpha=0.95, zorder=3)
+    if run_delayed_variant and cum_eod:
+        plt.plot(cum_eod, label="Ours-Delayed", color='C4', linestyle=':', linewidth=2.0, alpha=0.95, zorder=2.5)
     plt.plot(cum_er, label="Random",   color='C1', linestyle='--', linewidth=2.0, alpha=0.95, zorder=2)
     plt.plot(cum_eg, label="Greedy",    color='C2', linestyle='-.', linewidth=2.0, alpha=0.95, zorder=4)
     plt.plot(cum_eorc, label="Oracle",  color='C3', linestyle='-', linewidth=2.5, alpha=0.95, zorder=5)
@@ -1352,10 +1523,13 @@ def run_experiment() -> None:
     regret_eo = _cumulative_regret(cum_eo, cum_eorc)
     regret_er = _cumulative_regret(cum_er, cum_eorc)
     regret_eg = _cumulative_regret(cum_eg, cum_eorc)
+    regret_eod = _cumulative_regret(cum_eod, cum_eorc) if run_delayed_variant and cum_eod else np.asarray([])
 
     if regret_eo.size > 0:
         plt.figure(figsize=(9, 4))
-        plt.plot(np.arange(len(regret_eo)), regret_eo, label="Ours", color='C0', linewidth=2.0, alpha=0.9)
+        plt.plot(np.arange(len(regret_eo)), regret_eo, label="Ours-Immediate", color='C0', linewidth=2.0, alpha=0.9)
+        if regret_eod.size > 0:
+            plt.plot(np.arange(len(regret_eod)), regret_eod, label="Ours-Delayed", color='C4', linestyle=':', linewidth=1.8, alpha=0.9)
         if regret_er.size > 0:
             plt.plot(np.arange(len(regret_er)), regret_er, label="Random", color='C1', linestyle='--', linewidth=1.6, alpha=0.9)
         if regret_eg.size > 0:
@@ -1370,6 +1544,20 @@ def run_experiment() -> None:
         plt.savefig("output/compare_cum_expected_regret.png", dpi=150)
         plt.close()
 
+    if run_delayed_variant and pending_od:
+        plt.figure(figsize=(9, 4))
+        plt.plot(pending_od, label="Pending feedback count (delayed)", color='C4', linewidth=1.6)
+        if flushed_od:
+            plt.plot(flushed_od, label="Applied feedback per step", color='C0', linestyle='--', linewidth=1.2, alpha=0.8)
+        plt.title("Delayed Feedback Queue Dynamics")
+        plt.xlabel("Step")
+        plt.ylabel("Count")
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig("output/delayed_feedback_queue.png", dpi=150)
+        plt.close()
+
     # Print average expected net per selected assignment to help tune REPLICATION_COST
     def _avg_expected(cum_e_seq, assign_seq):
         total = float(cum_e_seq[-1]) if cum_e_seq else 0.0
@@ -1378,16 +1566,19 @@ def run_experiment() -> None:
         return avg, total, nsel
 
     avg_o, tot_o, n_o = _avg_expected(cum_eo, assign_o)
+    avg_od, tot_od, n_od = _avg_expected(cum_eod, assign_od) if run_delayed_variant else (0.0, 0.0, 0)
     avg_r, tot_r, n_r = _avg_expected(cum_er, assign_r)
     avg_g, tot_g, n_g = _avg_expected(cum_eg, assign_g)
     avg_orc, tot_orc, n_orc = _avg_expected(cum_eorc, assign_orc)
 
     print("[avg-expected-net] per selected assignment:")
-    print(f"  Ours: {avg_o:.4f} (total={tot_o:.2f}, selected={n_o})")
+    print(f"  Ours-Immediate: {avg_o:.4f} (total={tot_o:.2f}, selected={n_o})")
+    if run_delayed_variant:
+        print(f"  Ours-Delayed   : {avg_od:.4f} (total={tot_od:.2f}, selected={n_od})")
     print(f"  Random  : {avg_r:.4f} (total={tot_r:.2f}, selected={n_r})")
     print(f"  Greedy  : {avg_g:.4f} (total={tot_g:.2f}, selected={n_g})")
     print(f"  Oracle  : {avg_orc:.4f} (total={tot_orc:.2f}, selected={n_orc})")
-    print("Saved loss (Ours/Random) and cumulative reward (Ours/Random/Oracle) plots.")
+    print("Saved comparison plots including delayed-feedback variant and queue dynamics.")
 
     return
 

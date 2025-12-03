@@ -63,7 +63,7 @@ ASSIGNMENT_INSPECTION_DIR = "assignment_inspections"
 ASSIGNMENT_INSPECTION_STEPS = None
 
 # Economic parameters
-REPLICATION_COST = 0.2
+REPLICATION_COST = 0.21
 
 # UCB behaviour for the replicator
 REPLICATOR_USE_UCB = True

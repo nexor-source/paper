@@ -907,6 +907,15 @@ def run_experiment() -> None:
 
     from baselines import RandomBaseline, GreedyBaseline
     import matplotlib.pyplot as plt
+    COLOR_MAP = {
+        "Ours-Immediate": "#1f77b4",
+        "Ours-Delayed": "#ff7f0e",
+        "Random": "#2ca02c",
+        "Greedy": "#d62728",
+        "Oracle": "#9467bd",
+    }
+    def _c(label: str) -> str:
+        return COLOR_MAP.get(label, "#444444")
 
     def run_original(method_label: str = "Ours", enable_delay: Optional[bool] = None) -> Tuple[List[float], List[float], List[float], List[int], List[float], List[float], List[float], int, List[int], List[int]]:
         """Run the main method; enable_delay overrides config when set."""
@@ -1310,20 +1319,20 @@ def run_experiment() -> None:
 
     plt.figure(figsize=(9, 4))
     if lo_b is not None and hi_b is not None:
-        plt.fill_between(xo, lo_b, hi_b, color='C0', alpha=0.12)
-    plt.plot(xo, mo, label="Ours-Immediate (mean)", color='C0', linewidth=2.0)
+        plt.fill_between(xo, lo_b, hi_b, color=_c("Ours-Immediate"), alpha=0.12)
+    plt.plot(xo, mo, label="Ours-Immediate (mean)", color=_c("Ours-Immediate"), linewidth=2.0)
     if run_delayed_variant and mod is not None and lod_b is not None and hid_b is not None:
-        plt.fill_between(xod, lod_b, hid_b, color='C4', alpha=0.12)
+        plt.fill_between(xod, lod_b, hid_b, color=_c("Ours-Delayed"), alpha=0.12)
     if run_delayed_variant and mod is not None:
-        plt.plot(xod, mod, label="Ours-Delayed (mean)", color='C4', linewidth=2.0)
+        plt.plot(xod, mod, label="Ours-Delayed (mean)", color=_c("Ours-Delayed"), linewidth=2.0)
 
     if lr_b is not None and hr_b is not None:
-        plt.fill_between(xr, lr_b, hr_b, color='C1', alpha=0.12)
-    plt.plot(xr, mr, label="Random (mean)", color='C1', linewidth=2.0)
+        plt.fill_between(xr, lr_b, hr_b, color=_c("Random"), alpha=0.12)
+    plt.plot(xr, mr, label="Random (mean)", color=_c("Random"), linewidth=2.0)
 
     if lg_b is not None and hg_b is not None:
-        plt.fill_between(xg, lg_b, hg_b, color='C2', alpha=0.12)
-    plt.plot(xg, mg, label="Greedy (mean)", color='C2', linewidth=2.0)
+        plt.fill_between(xg, lg_b, hg_b, color=_c("Greedy"), alpha=0.12)
+    plt.plot(xg, mg, label="Greedy (mean)", color=_c("Greedy"), linewidth=2.0)
 
     plt.title(f"Loss (rolling mean, window={smooth_win})")
     plt.xlabel("Step (offset by window)")
@@ -1361,20 +1370,20 @@ def run_experiment() -> None:
 
     plt.figure(figsize=(9, 4))
     if lo_avg_b is not None and hi_avg_b is not None:
-        plt.fill_between(xo_avg, lo_avg_b, hi_avg_b, color='C0', alpha=0.12)
-    plt.plot(xo_avg, mo_avg, label="Ours-Immediate (mean)", color='C0', linewidth=2.0)
+        plt.fill_between(xo_avg, lo_avg_b, hi_avg_b, color=_c("Ours-Immediate"), alpha=0.12)
+    plt.plot(xo_avg, mo_avg, label="Ours-Immediate (mean)", color=_c("Ours-Immediate"), linewidth=2.0)
     if run_delayed_variant and mod_avg is not None and lod_avg_b is not None and hid_avg_b is not None:
-        plt.fill_between(xod_avg, lod_avg_b, hid_avg_b, color='C4', alpha=0.12)
+        plt.fill_between(xod_avg, lod_avg_b, hid_avg_b, color=_c("Ours-Delayed"), alpha=0.12)
     if run_delayed_variant and mod_avg is not None:
-        plt.plot(xod_avg, mod_avg, label="Ours-Delayed (mean)", color='C4', linewidth=2.0)
+        plt.plot(xod_avg, mod_avg, label="Ours-Delayed (mean)", color=_c("Ours-Delayed"), linewidth=2.0)
 
     if lr_avg_b is not None and hr_avg_b is not None:
-        plt.fill_between(xr_avg, lr_avg_b, hr_avg_b, color='C1', alpha=0.12)
-    plt.plot(xr_avg, mr_avg, label="Random (mean)", color='C1', linewidth=2.0)
+        plt.fill_between(xr_avg, lr_avg_b, hr_avg_b, color=_c("Random"), alpha=0.12)
+    plt.plot(xr_avg, mr_avg, label="Random (mean)", color=_c("Random"), linewidth=2.0)
 
     if lg_avg_b is not None and hg_avg_b is not None:
-        plt.fill_between(xg_avg, lg_avg_b, hg_avg_b, color='C2', alpha=0.12)
-    plt.plot(xg_avg, mg_avg, label="Greedy (mean)", color='C2', linewidth=2.0)
+        plt.fill_between(xg_avg, lg_avg_b, hg_avg_b, color=_c("Greedy"), alpha=0.12)
+    plt.plot(xg_avg, mg_avg, label="Greedy (mean)", color=_c("Greedy"), linewidth=2.0)
 
     plt.axhline(0.0, color='k', linestyle='--', linewidth=0.8, alpha=0.4)
     plt.title(f"Average Loss per Assignment (rolling mean, window={smooth_win})")
@@ -1397,10 +1406,10 @@ def run_experiment() -> None:
     steps_axis_od = np.arange(len(err_od))
 
     plt.figure(figsize=(9, 4))
-    plt.plot(steps_axis, err_o, label="Ours-Immediate", color='C0', linewidth=1.0, alpha=0.85)
+    plt.plot(steps_axis, err_o, label="Ours-Immediate", color=_c("Ours-Immediate"), linewidth=1.0, alpha=0.85)
     if run_delayed_variant and err_od.size > 0:
-        plt.plot(steps_axis_od, err_od, label="Ours-Delayed", color='C4', linewidth=1.0, alpha=0.85)
-    plt.plot(steps_axis_g, err_g, label="Greedy", color='C2', linewidth=1.0, alpha=0.85)
+        plt.plot(steps_axis_od, err_od, label="Ours-Delayed", color=_c("Ours-Delayed"), linewidth=1.0, alpha=0.85)
+    plt.plot(steps_axis_g, err_g, label="Greedy", color=_c("Greedy"), linewidth=1.0, alpha=0.85)
     plt.axhline(0.0, color='k', linestyle='--', linewidth=0.8, alpha=0.4)
     plt.title("Prediction Bias (Signed Error on Selected Assignments)")
     plt.xlabel("Step")
@@ -1412,10 +1421,10 @@ def run_experiment() -> None:
     plt.close()
 
     plt.figure(figsize=(9, 4))
-    plt.plot(steps_axis, err_abs_o, label="Ours-Immediate", color='C0', linewidth=1.0, alpha=0.85)
+    plt.plot(steps_axis, err_abs_o, label="Ours-Immediate", color=_c("Ours-Immediate"), linewidth=1.0, alpha=0.85)
     if run_delayed_variant and err_abs_od.size > 0:
-        plt.plot(steps_axis_od, err_abs_od, label="Ours-Delayed", color='C4', linewidth=1.0, alpha=0.85)
-    plt.plot(steps_axis_g, err_abs_g, label="Greedy", color='C2', linewidth=1.0, alpha=0.85)
+        plt.plot(steps_axis_od, err_abs_od, label="Ours-Delayed", color=_c("Ours-Delayed"), linewidth=1.0, alpha=0.85)
+    plt.plot(steps_axis_g, err_abs_g, label="Greedy", color=_c("Greedy"), linewidth=1.0, alpha=0.85)
     plt.title("Prediction Error Magnitude on Selected Assignments")
     plt.xlabel("Step")
     plt.ylabel("|Predicted net - true net|")
@@ -1434,16 +1443,16 @@ def run_experiment() -> None:
 
     plt.figure(figsize=(9, 4))
     if lo_abs_o is not None and hi_abs_o is not None and len(lo_abs_o) > 0:
-        plt.fill_between(x_abs_o, lo_abs_o, hi_abs_o, color='C0', alpha=0.12)
-    plt.plot(x_abs_o, mean_abs_o, label="Ours-Immediate (mean)", color='C0', linewidth=2.0)
+        plt.fill_between(x_abs_o, lo_abs_o, hi_abs_o, color=_c("Ours-Immediate"), alpha=0.12)
+    plt.plot(x_abs_o, mean_abs_o, label="Ours-Immediate (mean)", color=_c("Ours-Immediate"), linewidth=2.0)
     if run_delayed_variant and lo_abs_od is not None and hi_abs_od is not None and len(lo_abs_od) > 0:
-        plt.fill_between(x_abs_od, lo_abs_od, hi_abs_od, color='C4', alpha=0.12)
+        plt.fill_between(x_abs_od, lo_abs_od, hi_abs_od, color=_c("Ours-Delayed"), alpha=0.12)
     if run_delayed_variant and mean_abs_od is not None:
-        plt.plot(x_abs_od, mean_abs_od, label="Ours-Delayed (mean)", color='C4', linewidth=2.0)
+        plt.plot(x_abs_od, mean_abs_od, label="Ours-Delayed (mean)", color=_c("Ours-Delayed"), linewidth=2.0)
 
     if lo_abs_g is not None and hi_abs_g is not None and len(lo_abs_g) > 0:
-        plt.fill_between(x_abs_g, lo_abs_g, hi_abs_g, color='C2', alpha=0.12)
-    plt.plot(x_abs_g, mean_abs_g, label="Greedy (mean)", color='C2', linewidth=2.0)
+        plt.fill_between(x_abs_g, lo_abs_g, hi_abs_g, color=_c("Greedy"), alpha=0.12)
+    plt.plot(x_abs_g, mean_abs_g, label="Greedy (mean)", color=_c("Greedy"), linewidth=2.0)
 
     plt.title(f"|Prediction Error| (rolling mean, window={smooth_win})")
     plt.xlabel("Step (offset by window)")
@@ -1505,12 +1514,12 @@ def run_experiment() -> None:
     # New: Expected cumulative net reward (sum of expected net per step)
     plt.figure(figsize=(9, 4))
     # 使用不同的线型，避免重叠时“看成三条线”的错觉
-    plt.plot(cum_eo, label="Ours-Immediate", color='C0', linestyle='-', linewidth=2.0, alpha=0.95, zorder=3)
+    plt.plot(cum_eo, label="Ours-Immediate", color=_c("Ours-Immediate"), linestyle='-', linewidth=2.0, alpha=0.95, zorder=3)
     if run_delayed_variant and cum_eod:
-        plt.plot(cum_eod, label="Ours-Delayed", color='C4', linestyle=':', linewidth=2.0, alpha=0.95, zorder=2.5)
-    plt.plot(cum_er, label="Random",   color='C1', linestyle='--', linewidth=2.0, alpha=0.95, zorder=2)
-    plt.plot(cum_eg, label="Greedy",    color='C2', linestyle='-.', linewidth=2.0, alpha=0.95, zorder=4)
-    plt.plot(cum_eorc, label="Oracle",  color='C3', linestyle='-', linewidth=2.5, alpha=0.95, zorder=5)
+        plt.plot(cum_eod, label="Ours-Delayed", color=_c("Ours-Delayed"), linestyle=':', linewidth=2.0, alpha=0.95, zorder=2.5)
+    plt.plot(cum_er, label="Random",   color=_c("Random"), linestyle='--', linewidth=2.0, alpha=0.95, zorder=2)
+    plt.plot(cum_eg, label="Greedy",    color=_c("Greedy"), linestyle='-.', linewidth=2.0, alpha=0.95, zorder=4)
+    plt.plot(cum_eorc, label="Oracle",  color=_c("Oracle"), linestyle='-', linewidth=2.5, alpha=0.95, zorder=5)
     plt.title("Expected Cumulative Net Reward")
     plt.xlabel("Step")
     plt.ylabel("Cumulative Expected Reward (sum(E[r]-cost))")
@@ -1527,13 +1536,13 @@ def run_experiment() -> None:
 
     if regret_eo.size > 0:
         plt.figure(figsize=(9, 4))
-        plt.plot(np.arange(len(regret_eo)), regret_eo, label="Ours-Immediate", color='C0', linewidth=2.0, alpha=0.9)
+        plt.plot(np.arange(len(regret_eo)), regret_eo, label="Ours-Immediate", color=_c("Ours-Immediate"), linewidth=2.0, alpha=0.9)
         if regret_eod.size > 0:
-            plt.plot(np.arange(len(regret_eod)), regret_eod, label="Ours-Delayed", color='C4', linestyle=':', linewidth=1.8, alpha=0.9)
+            plt.plot(np.arange(len(regret_eod)), regret_eod, label="Ours-Delayed", color=_c("Ours-Delayed"), linestyle=':', linewidth=1.8, alpha=0.9)
         if regret_er.size > 0:
-            plt.plot(np.arange(len(regret_er)), regret_er, label="Random", color='C1', linestyle='--', linewidth=1.6, alpha=0.9)
+            plt.plot(np.arange(len(regret_er)), regret_er, label="Random", color=_c("Random"), linestyle='--', linewidth=1.6, alpha=0.9)
         if regret_eg.size > 0:
-            plt.plot(np.arange(len(regret_eg)), regret_eg, label="Greedy", color='C2', linestyle='-.', linewidth=1.6, alpha=0.9)
+            plt.plot(np.arange(len(regret_eg)), regret_eg, label="Greedy", color=_c("Greedy"), linestyle='-.', linewidth=1.6, alpha=0.9)
         plt.axhline(0.0, color="k", linestyle="--", linewidth=0.8, alpha=0.4)
         plt.title("Cumulative Expected Regret")
         plt.xlabel("Step")
@@ -1546,9 +1555,9 @@ def run_experiment() -> None:
 
     if run_delayed_variant and pending_od:
         plt.figure(figsize=(9, 4))
-        plt.plot(pending_od, label="Pending feedback count (delayed)", color='C4', linewidth=1.6)
+        plt.plot(pending_od, label="Pending feedback count (delayed)", color=_c("Ours-Delayed"), linewidth=1.6)
         if flushed_od:
-            plt.plot(flushed_od, label="Applied feedback per step", color='C0', linestyle='--', linewidth=1.2, alpha=0.8)
+            plt.plot(flushed_od, label="Applied feedback per step", color=_c("Ours-Immediate"), linestyle='--', linewidth=1.2, alpha=0.8)
         plt.title("Delayed Feedback Queue Dynamics")
         plt.xlabel("Step")
         plt.ylabel("Count")

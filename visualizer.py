@@ -1,8 +1,35 @@
 import os
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from matplotlib import cm
+from matplotlib import cm, font_manager
 from typing import Dict, List, Optional, Sequence, Set, Tuple
+
+
+def _configure_chinese_font() -> None:
+    candidates = [
+        "Microsoft YaHei",
+        "SimHei",
+        "Noto Sans CJK SC",
+        "Source Han Sans SC",
+        "PingFang SC",
+        "WenQuanYi Zen Hei",
+    ]
+    available = {f.name for f in font_manager.fontManager.ttflist}
+    for name in candidates:
+        if name in available:
+            plt.rcParams["font.sans-serif"] = [name]
+            plt.rcParams["axes.unicode_minus"] = False
+            break
+    plt.rcParams["font.size"] = 11
+    plt.rcParams["axes.titlesize"] = 13
+    plt.rcParams["axes.labelsize"] = 11
+    plt.rcParams["xtick.labelsize"] = 11
+    plt.rcParams["ytick.labelsize"] = 11
+    plt.rcParams["legend.fontsize"] = 11
+    plt.rcParams["figure.titlesize"] = 13
+
+
+_configure_chinese_font()
 
 
 class PartitionVisualizer:
@@ -53,11 +80,11 @@ class PartitionVisualizer:
             filtered = self.partitions
 
         fig, ax = plt.subplots(figsize=(8, 8))
-        ax.set_title(f"Context Partition Visualization (Iteration {iteration})")
+        ax.set_title(f"上下文划分可视化 (迭代 {iteration})")
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
-        ax.set_xlabel(f"Feature {dim_x}")
-        ax.set_ylabel(f"Feature {dim_y}")
+        ax.set_xlabel(f"特征 {dim_x}")
+        ax.set_ylabel(f"特征 {dim_y}")
 
         qualities = [p.estimated_quality for p in filtered]
         if qualities:
@@ -90,7 +117,7 @@ class PartitionVisualizer:
                     cy,
                     f"{partition.sample_count}",
                     color="white",
-                    fontsize=10,
+                    fontsize=11,
                     ha="center",
                     va="center",
                 )
@@ -98,7 +125,7 @@ class PartitionVisualizer:
         sm = plt.cm.ScalarMappable(cmap=cm.viridis, norm=norm)
         sm.set_array([])
         cbar = plt.colorbar(sm, ax=ax)
-        cbar.set_label("Estimated Quality")
+        cbar.set_label("估计质量")
 
         ax.grid(True)
         plt.tight_layout()
@@ -127,8 +154,8 @@ def render_assignment_matrix(
         return
 
     # Determine figure size adaptively: wider for more tasks, taller for more workers
-    width = max(8.0, 1.5 + 0.85 * len(task_ids))
-    height = max(5.5, 1.8 + 0.55 * len(worker_ids))
+    width = max(9.0, 1.8 + 0.95 * len(task_ids))
+    height = max(6.0, 2.1 + 0.65 * len(worker_ids))
     fig, ax = plt.subplots(figsize=(width, height))
     ax.axis("off")
 
@@ -167,22 +194,22 @@ def render_assignment_matrix(
         cellLoc="center",
     )
     table.auto_set_font_size(False)
-    table.set_fontsize(10)
-    table.scale(1.45, 2.2)
+    table.set_fontsize(11)
+    table.scale(1.6, 2.6)
 
-    title = f"{method_name} — Step {step_index}"
-    subtitle = "cell: predicted net\n(parentheses: oracle net)"
-    ax.set_title(title, fontsize=14, pad=16)
-    fig.text(0.02, 0.93, subtitle, fontsize=9, ha="left", va="top")
+    title = f"{method_name} - 时间步 {step_index}"
+    subtitle = "单元格: 预测净收益\n(括号: Oracle 净收益)"
+    ax.set_title(title, fontsize=17, pad=16)
+    fig.text(0.02, 0.93, subtitle, fontsize=12, ha="left", va="top")
 
     selected_pred_sum = sum(predicted_net.get(key, 0.0) for key in selected_set)
     selected_true_sum = sum(true_net.get(key, 0.0) for key in selected_set)
     summary = (
-        f"Selected assignments: {len(selected_set)} | "
-        f"Predicted net sum = {selected_pred_sum:.3f} | "
-        f"True net sum = {selected_true_sum:.3f}"
+        f"已选分配: {len(selected_set)} | "
+        f"预测净收益总和 = {selected_pred_sum:.3f} | "
+        f"真实净收益总和 = {selected_true_sum:.3f}"
     )
-    fig.text(0.5, 0.04, summary, fontsize=10, ha="center", va="center")
+    fig.text(0.5, 0.04, summary, fontsize=13, ha="center", va="center")
 
     fig.tight_layout(rect=(0.02, 0.08, 0.98, 0.92))
     os.makedirs(os.path.dirname(save_path), exist_ok=True)

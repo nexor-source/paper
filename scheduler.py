@@ -2,12 +2,41 @@
 import os
 from collections import deque
 from typing import List, Dict, Callable, Tuple, Optional
+import matplotlib.pyplot as plt
+from matplotlib import font_manager
 from matching_utils import run_hungarian_matching
 
 from normalizer import ContextNormalizer
 from task_replicator import Assignment, TaskReplicator
 from visualizer import PartitionVisualizer, render_assignment_matrix
 from config import *
+
+
+def _configure_chinese_font() -> None:
+    candidates = [
+        "Microsoft YaHei",
+        "SimHei",
+        "Noto Sans CJK SC",
+        "Source Han Sans SC",
+        "PingFang SC",
+        "WenQuanYi Zen Hei",
+    ]
+    available = {f.name for f in font_manager.fontManager.ttflist}
+    for name in candidates:
+        if name in available:
+            plt.rcParams["font.sans-serif"] = [name]
+            plt.rcParams["axes.unicode_minus"] = False
+            break
+    plt.rcParams["font.size"] = 11
+    plt.rcParams["axes.titlesize"] = 13
+    plt.rcParams["axes.labelsize"] = 11
+    plt.rcParams["xtick.labelsize"] = 11
+    plt.rcParams["ytick.labelsize"] = 11
+    plt.rcParams["legend.fontsize"] = 11
+    plt.rcParams["figure.titlesize"] = 13
+
+
+_configure_chinese_font()
 
 # 全局记录每一步的 loss（oracle 与算法期望净收益之差的非负部分）
 LOSS_HISTORY: List[float] = []
@@ -906,7 +935,6 @@ def run_experiment() -> None:
         worker_timeline = _generate_worker_timeline(base_workers, steps)
 
     from baselines import RandomBaseline, GreedyBaseline
-    import matplotlib.pyplot as plt
     COLOR_MAP = {
         "Ours-Immediate": "#1f77b4",
         "Ours-Delayed": "#ff7f0e",
@@ -1266,9 +1294,9 @@ def run_experiment() -> None:
         plt.plot(loss_od, label="Ours-Delayed", linewidth=1.0, alpha=0.7)
     plt.plot(loss_r, label="Random", linewidth=1.0, alpha=0.7)
     plt.plot(loss_g, label="Greedy", linewidth=1.0, alpha=0.7)
-    plt.title("Loss Comparison (raw)")
-    plt.xlabel("Step")
-    plt.ylabel("Loss")
+    plt.title("损失对比 (原始)")
+    plt.xlabel("时间步")
+    plt.ylabel("损失")
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()
@@ -1320,23 +1348,23 @@ def run_experiment() -> None:
     plt.figure(figsize=(9, 4))
     if lo_b is not None and hi_b is not None:
         plt.fill_between(xo, lo_b, hi_b, color=_c("Ours-Immediate"), alpha=0.12)
-    plt.plot(xo, mo, label="Ours-Immediate (mean)", color=_c("Ours-Immediate"), linewidth=2.0)
+    plt.plot(xo, mo, label="Ours-Immediate (均值)", color=_c("Ours-Immediate"), linewidth=2.0)
     if run_delayed_variant and mod is not None and lod_b is not None and hid_b is not None:
         plt.fill_between(xod, lod_b, hid_b, color=_c("Ours-Delayed"), alpha=0.12)
     if run_delayed_variant and mod is not None:
-        plt.plot(xod, mod, label="Ours-Delayed (mean)", color=_c("Ours-Delayed"), linewidth=2.0)
+        plt.plot(xod, mod, label="Ours-Delayed (均值)", color=_c("Ours-Delayed"), linewidth=2.0)
 
     if lr_b is not None and hr_b is not None:
         plt.fill_between(xr, lr_b, hr_b, color=_c("Random"), alpha=0.12)
-    plt.plot(xr, mr, label="Random (mean)", color=_c("Random"), linewidth=2.0)
+    plt.plot(xr, mr, label="Random (均值)", color=_c("Random"), linewidth=2.0)
 
     if lg_b is not None and hg_b is not None:
         plt.fill_between(xg, lg_b, hg_b, color=_c("Greedy"), alpha=0.12)
-    plt.plot(xg, mg, label="Greedy (mean)", color=_c("Greedy"), linewidth=2.0)
+    plt.plot(xg, mg, label="Greedy (均值)", color=_c("Greedy"), linewidth=2.0)
 
-    plt.title(f"Loss (rolling mean, window={smooth_win})")
-    plt.xlabel("Step (offset by window)")
-    plt.ylabel("Loss")
+    plt.title(f"损失 (滑动平均, 窗口={smooth_win})")
+    plt.xlabel("时间步 (按窗口偏移)")
+    plt.ylabel("损失")
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()
@@ -1351,9 +1379,9 @@ def run_experiment() -> None:
     plt.plot(avg_loss_r, label="Random", linewidth=1.0, alpha=0.7)
     plt.plot(avg_loss_g, label="Greedy", linewidth=1.0, alpha=0.7)
     plt.axhline(0.0, color='k', linestyle='--', linewidth=0.8, alpha=0.4)
-    plt.title("Average Loss per Assignment (raw)")
-    plt.xlabel("Step")
-    plt.ylabel("Avg loss (method - oracle)")
+    plt.title("每次分配平均损失 (原始)")
+    plt.xlabel("时间步")
+    plt.ylabel("平均损失 (方法 - Oracle)")
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()
@@ -1371,24 +1399,24 @@ def run_experiment() -> None:
     plt.figure(figsize=(9, 4))
     if lo_avg_b is not None and hi_avg_b is not None:
         plt.fill_between(xo_avg, lo_avg_b, hi_avg_b, color=_c("Ours-Immediate"), alpha=0.12)
-    plt.plot(xo_avg, mo_avg, label="Ours-Immediate (mean)", color=_c("Ours-Immediate"), linewidth=2.0)
+    plt.plot(xo_avg, mo_avg, label="Ours-Immediate (均值)", color=_c("Ours-Immediate"), linewidth=2.0)
     if run_delayed_variant and mod_avg is not None and lod_avg_b is not None and hid_avg_b is not None:
         plt.fill_between(xod_avg, lod_avg_b, hid_avg_b, color=_c("Ours-Delayed"), alpha=0.12)
     if run_delayed_variant and mod_avg is not None:
-        plt.plot(xod_avg, mod_avg, label="Ours-Delayed (mean)", color=_c("Ours-Delayed"), linewidth=2.0)
+        plt.plot(xod_avg, mod_avg, label="Ours-Delayed (均值)", color=_c("Ours-Delayed"), linewidth=2.0)
 
     if lr_avg_b is not None and hr_avg_b is not None:
         plt.fill_between(xr_avg, lr_avg_b, hr_avg_b, color=_c("Random"), alpha=0.12)
-    plt.plot(xr_avg, mr_avg, label="Random (mean)", color=_c("Random"), linewidth=2.0)
+    plt.plot(xr_avg, mr_avg, label="Random (均值)", color=_c("Random"), linewidth=2.0)
 
     if lg_avg_b is not None and hg_avg_b is not None:
         plt.fill_between(xg_avg, lg_avg_b, hg_avg_b, color=_c("Greedy"), alpha=0.12)
-    plt.plot(xg_avg, mg_avg, label="Greedy (mean)", color=_c("Greedy"), linewidth=2.0)
+    plt.plot(xg_avg, mg_avg, label="Greedy (均值)", color=_c("Greedy"), linewidth=2.0)
 
     plt.axhline(0.0, color='k', linestyle='--', linewidth=0.8, alpha=0.4)
-    plt.title(f"Average Loss per Assignment (rolling mean, window={smooth_win})")
-    plt.xlabel("Step (offset by window)")
-    plt.ylabel("Avg loss (method - oracle)")
+    plt.title(f"每次分配平均损失 (滑动平均, 窗口={smooth_win})")
+    plt.xlabel("时间步 (按窗口偏移)")
+    plt.ylabel("平均损失 (方法 - Oracle)")
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()
@@ -1411,9 +1439,9 @@ def run_experiment() -> None:
         plt.plot(steps_axis_od, err_od, label="Ours-Delayed", color=_c("Ours-Delayed"), linewidth=1.0, alpha=0.85)
     plt.plot(steps_axis_g, err_g, label="Greedy", color=_c("Greedy"), linewidth=1.0, alpha=0.85)
     plt.axhline(0.0, color='k', linestyle='--', linewidth=0.8, alpha=0.4)
-    plt.title("Prediction Bias (Signed Error on Selected Assignments)")
-    plt.xlabel("Step")
-    plt.ylabel("Predicted net - true net")
+    plt.title("预测偏差 (选中分配的有符号误差)")
+    plt.xlabel("时间步")
+    plt.ylabel("预测净收益 - 真实净收益")
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()
@@ -1425,9 +1453,9 @@ def run_experiment() -> None:
     if run_delayed_variant and err_abs_od.size > 0:
         plt.plot(steps_axis_od, err_abs_od, label="Ours-Delayed", color=_c("Ours-Delayed"), linewidth=1.0, alpha=0.85)
     plt.plot(steps_axis_g, err_abs_g, label="Greedy", color=_c("Greedy"), linewidth=1.0, alpha=0.85)
-    plt.title("Prediction Error Magnitude on Selected Assignments")
-    plt.xlabel("Step")
-    plt.ylabel("|Predicted net - true net|")
+    plt.title("选中分配的预测误差幅度")
+    plt.xlabel("时间步")
+    plt.ylabel("|预测净收益 - 真实净收益|")
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()
@@ -1444,19 +1472,19 @@ def run_experiment() -> None:
     plt.figure(figsize=(9, 4))
     if lo_abs_o is not None and hi_abs_o is not None and len(lo_abs_o) > 0:
         plt.fill_between(x_abs_o, lo_abs_o, hi_abs_o, color=_c("Ours-Immediate"), alpha=0.12)
-    plt.plot(x_abs_o, mean_abs_o, label="Ours-Immediate (mean)", color=_c("Ours-Immediate"), linewidth=2.0)
+    plt.plot(x_abs_o, mean_abs_o, label="Ours-Immediate (均值)", color=_c("Ours-Immediate"), linewidth=2.0)
     if run_delayed_variant and lo_abs_od is not None and hi_abs_od is not None and len(lo_abs_od) > 0:
         plt.fill_between(x_abs_od, lo_abs_od, hi_abs_od, color=_c("Ours-Delayed"), alpha=0.12)
     if run_delayed_variant and mean_abs_od is not None:
-        plt.plot(x_abs_od, mean_abs_od, label="Ours-Delayed (mean)", color=_c("Ours-Delayed"), linewidth=2.0)
+        plt.plot(x_abs_od, mean_abs_od, label="Ours-Delayed (均值)", color=_c("Ours-Delayed"), linewidth=2.0)
 
     if lo_abs_g is not None and hi_abs_g is not None and len(lo_abs_g) > 0:
         plt.fill_between(x_abs_g, lo_abs_g, hi_abs_g, color=_c("Greedy"), alpha=0.12)
-    plt.plot(x_abs_g, mean_abs_g, label="Greedy (mean)", color=_c("Greedy"), linewidth=2.0)
+    plt.plot(x_abs_g, mean_abs_g, label="Greedy (均值)", color=_c("Greedy"), linewidth=2.0)
 
-    plt.title(f"|Prediction Error| (rolling mean, window={smooth_win})")
-    plt.xlabel("Step (offset by window)")
-    plt.ylabel("|Predicted net - true net|")
+    plt.title(f"|预测误差| (滑动平均, 窗口={smooth_win})")
+    plt.xlabel("时间步 (按窗口偏移)")
+    plt.ylabel("|预测净收益 - 真实净收益|")
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()
@@ -1470,9 +1498,9 @@ def run_experiment() -> None:
     plt.plot(cum_r, label="Random")
     plt.plot(cum_g, label="Greedy")
     plt.plot(cum_orc, label="Oracle")
-    plt.title("Cumulative Net Reward")
-    plt.xlabel("Step")
-    plt.ylabel("Cumulative Reward (sum(reward - cost))")
+    plt.title("累计净收益")
+    plt.xlabel("时间步")
+    plt.ylabel("累计收益 (sum(reward - cost))")
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()
@@ -1502,9 +1530,9 @@ def run_experiment() -> None:
         if regret_g.size > 0:
             plt.plot(np.arange(len(regret_g)), regret_g, label="Greedy", linewidth=1.0, alpha=0.85)
         plt.axhline(0.0, color="k", linestyle="--", linewidth=0.8, alpha=0.4)
-        plt.title("Cumulative Regret (Oracle - Realized Method Reward)")
-        plt.xlabel("Step")
-        plt.ylabel("Cumulative Regret")
+        plt.title("累计遗憾 (Oracle - 实际方法收益)")
+        plt.xlabel("时间步")
+        plt.ylabel("累计遗憾")
         plt.grid(True, alpha=0.3)
         plt.legend()
         plt.tight_layout()
@@ -1520,9 +1548,9 @@ def run_experiment() -> None:
     plt.plot(cum_er, label="Random",   color=_c("Random"), linestyle='--', linewidth=2.0, alpha=0.95, zorder=2)
     plt.plot(cum_eg, label="Greedy",    color=_c("Greedy"), linestyle='-.', linewidth=2.0, alpha=0.95, zorder=4)
     plt.plot(cum_eorc, label="Oracle",  color=_c("Oracle"), linestyle='-', linewidth=2.5, alpha=0.95, zorder=5)
-    plt.title("Expected Cumulative Net Reward")
-    plt.xlabel("Step")
-    plt.ylabel("Cumulative Expected Reward (sum(E[r]-cost))")
+    plt.title("期望累计净收益")
+    plt.xlabel("时间步")
+    plt.ylabel("累计期望收益 (sum(E[r]-cost))")
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()
@@ -1544,9 +1572,9 @@ def run_experiment() -> None:
         if regret_eg.size > 0:
             plt.plot(np.arange(len(regret_eg)), regret_eg, label="Greedy", color=_c("Greedy"), linestyle='-.', linewidth=1.6, alpha=0.9)
         plt.axhline(0.0, color="k", linestyle="--", linewidth=0.8, alpha=0.4)
-        plt.title("Cumulative Expected Regret")
-        plt.xlabel("Step")
-        plt.ylabel("Cumulative Expected Regret")
+        plt.title("累计期望遗憾")
+        plt.xlabel("时间步")
+        plt.ylabel("累计期望遗憾")
         plt.grid(True, alpha=0.3)
         plt.legend()
         plt.tight_layout()
@@ -1555,12 +1583,12 @@ def run_experiment() -> None:
 
     if run_delayed_variant and pending_od:
         plt.figure(figsize=(9, 4))
-        plt.plot(pending_od, label="Pending feedback count (delayed)", color=_c("Ours-Delayed"), linewidth=1.6)
+        plt.plot(pending_od, label="待处理反馈数量 (延迟)", color=_c("Ours-Delayed"), linewidth=1.6)
         if flushed_od:
-            plt.plot(flushed_od, label="Applied feedback per step", color=_c("Ours-Immediate"), linestyle='--', linewidth=1.2, alpha=0.8)
-        plt.title("Delayed Feedback Queue Dynamics")
-        plt.xlabel("Step")
-        plt.ylabel("Count")
+            plt.plot(flushed_od, label="每步应用的反馈", color=_c("Ours-Immediate"), linestyle='--', linewidth=1.2, alpha=0.8)
+        plt.title("延迟反馈队列动态")
+        plt.xlabel("时间步")
+        plt.ylabel("数量")
         plt.grid(True, alpha=0.3)
         plt.legend()
         plt.tight_layout()

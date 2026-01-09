@@ -23,6 +23,7 @@ from __future__ import annotations
 import math
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -35,7 +36,34 @@ OUTPUT_DIR = Path("output") / "challenge"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-SPECIALITY_NAMES = ["Compute", "Bandwidth", "Mobility"]
+def _configure_chinese_font() -> None:
+    candidates = [
+        "Microsoft YaHei",
+        "SimHei",
+        "Noto Sans CJK SC",
+        "Source Han Sans SC",
+        "PingFang SC",
+        "WenQuanYi Zen Hei",
+    ]
+    available = {f.name for f in font_manager.fontManager.ttflist}
+    for name in candidates:
+        if name in available:
+            plt.rcParams["font.sans-serif"] = [name]
+            plt.rcParams["axes.unicode_minus"] = False
+            break
+    plt.rcParams["font.size"] = 11
+    plt.rcParams["axes.titlesize"] = 13
+    plt.rcParams["axes.labelsize"] = 11
+    plt.rcParams["xtick.labelsize"] = 11
+    plt.rcParams["ytick.labelsize"] = 11
+    plt.rcParams["legend.fontsize"] = 11
+    plt.rcParams["figure.titlesize"] = 13
+
+
+_configure_chinese_font()
+
+
+SPECIALITY_NAMES = ["计算", "带宽", "移动"]
 
 
 @dataclass
@@ -184,11 +212,11 @@ def plot_heatmap(step_idx: int,
 
     vmax = 1.0
     worker_labels = [
-        f"W{w.wid}\n{SPECIALITY_NAMES[w.speciality][0]}"
+        f"工{w.wid}\n{SPECIALITY_NAMES[w.speciality][0]}"
         for w in workers
     ]
     task_labels = [
-        f"T{t.tid}\n{SPECIALITY_NAMES[t.speciality][0]}"
+        f"任{t.tid}\n{SPECIALITY_NAMES[t.speciality][0]}"
         for t in tasks
     ]
 
@@ -199,19 +227,19 @@ def plot_heatmap(step_idx: int,
     ):
         im = ax.imshow(profits, cmap="viridis", vmin=0.0, vmax=vmax)
         ax.set_xticks(range(len(workers)))
-        ax.set_xticklabels(worker_labels, rotation=45, ha="right", fontsize=8)
+        ax.set_xticklabels(worker_labels, rotation=45, ha="right", fontsize=9)
         ax.set_yticks(range(len(tasks)))
-        ax.set_yticklabels(task_labels, fontsize=8)
-        ax.set_title(title, fontsize=12, fontweight="bold")
-        ax.set_xlabel("Worker")
-        ax.set_ylabel("Task")
+        ax.set_yticklabels(task_labels, fontsize=9)
+        ax.set_title(title, fontsize=13, fontweight="bold")
+        ax.set_xlabel("工人")
+        ax.set_ylabel("任务")
 
         for t, w, val in picks:
             ax.scatter(w, t, marker="o", s=90, facecolors="none", edgecolors="white", linewidths=1.8)
-            ax.text(w, t, f"{val:.2f}", color="white", ha="center", va="center", fontsize=8, weight="bold")
+            ax.text(w, t, f"{val:.2f}", color="white", ha="center", va="center", fontsize=9, weight="bold")
 
-    fig.colorbar(im, ax=axes, fraction=0.046, pad=0.04, label="Expected net reward")
-    fig.suptitle(f"Step {step_idx}: Ours vs Greedy selections", fontsize=13, fontweight="bold")
+    fig.colorbar(im, ax=axes, fraction=0.046, pad=0.04, label="期望净收益")
+    fig.suptitle(f"时间步 {step_idx}: Ours 与 Greedy 选择结果", fontsize=14, fontweight="bold")
     fig.savefig(OUTPUT_DIR / f"step_{step_idx:03d}.png", dpi=150)
     plt.close(fig)
 
@@ -245,9 +273,9 @@ def plot_totals(step_totals: Dict[str, List[float]],
             color=colors.get(label, None),
             alpha=0.65,
         )
-    axes[0].set_title("Per-Step Expected Reward")
-    axes[0].set_xlabel("Step")
-    axes[0].set_ylabel("Reward")
+    axes[0].set_title("每个时间步期望收益")
+    axes[0].set_xlabel("时间步")
+    axes[0].set_ylabel("收益")
     tick_positions = np.linspace(0, len(steps) - 1, num=6)
     tick_positions = np.unique(np.round(tick_positions).astype(int))
     axes[0].set_xticks(tick_positions)
@@ -271,9 +299,9 @@ def plot_totals(step_totals: Dict[str, List[float]],
             markersize=4,
             markevery=_markevery(series),
         )
-    axes[1].set_title("Cumulative Expected Reward")
-    axes[1].set_xlabel("Step")
-    axes[1].set_ylabel("Cumulative reward")
+    axes[1].set_title("累计期望收益")
+    axes[1].set_xlabel("时间步")
+    axes[1].set_ylabel("累计收益")
     cum_min = min(min(series) for series in cumulative.values())
     cum_max = max(max(series) for series in cumulative.values())
     cum_margin = max(5.0, 0.03 * (cum_max - cum_min))
@@ -281,7 +309,7 @@ def plot_totals(step_totals: Dict[str, List[float]],
     axes[1].grid(True, alpha=0.3)
     axes[1].legend()
 
-    fig.suptitle("Challenge Scenario – Ours vs Greedy", fontsize=14, fontweight="bold")
+    fig.suptitle("挑战场景: Ours 与 Greedy", fontsize=15, fontweight="bold")
     fig.savefig(OUTPUT_DIR / "challenge_totals.png", dpi=150)
     plt.close(fig)
 

@@ -41,7 +41,7 @@ PARTITION_VARIANCE_THRESHOLD = 0.005 # variance gate for splitting
 
 # Experiment settings
 RUN_COMPARISON = True
-COMPARISON_STEPS = 1000
+COMPARISON_STEPS = 2000
 COMPARISON_BATCH_SIZE = 10
 ARRIVALS_PER_STEP = (6, 16)
 ENABLE_WORKER_DYNAMICS_COMPARISON = True
@@ -55,6 +55,7 @@ RUN_DELAYED_FEEDBACK_VARIANT = True  # run both immediate and delayed variants f
 
 # Plot smoothing parameters
 LOSS_SMOOTH_WINDOW = 100
+PLOT_USE_CHINESE = True
 
 # Assignment inspection snapshots
 ASSIGNMENT_INSPECTION_COUNT = 5
@@ -69,3 +70,12 @@ REPLICATION_COST = 0.21
 REPLICATOR_USE_UCB = True
 REPLICATOR_UCB_COEF = 0.3
 REPLICATOR_UCB_MIN_PULLS = 1
+
+# Chapter 4's parameters
+
+# 是否开启差分隐私（在 scheduler 中会动态覆盖此值以作对比）
+ENABLE_DP = False
+# 隐私预算 epsilon（越小隐私越强，噪声越大）
+DP_EPSILON = 1.0
+# DP-UCB 置信补偿项的权重系数
+DP_UCB_BETA = 0.5

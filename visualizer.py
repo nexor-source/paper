@@ -4,6 +4,20 @@ import matplotlib.patches as patches
 from matplotlib import cm, font_manager
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
+from config import PLOT_USE_CHINESE
+
+
+USE_CN = bool(PLOT_USE_CHINESE)
+
+
+def _t(cn: str, en: str) -> str:
+    return cn if USE_CN else en
+
+
+def _tf(cn: str, en: str, **kwargs) -> str:
+    template = cn if USE_CN else en
+    return template.format(**kwargs)
+
 
 def _configure_chinese_font() -> None:
     candidates = [
@@ -14,12 +28,13 @@ def _configure_chinese_font() -> None:
         "PingFang SC",
         "WenQuanYi Zen Hei",
     ]
-    available = {f.name for f in font_manager.fontManager.ttflist}
-    for name in candidates:
-        if name in available:
-            plt.rcParams["font.sans-serif"] = [name]
-            plt.rcParams["axes.unicode_minus"] = False
-            break
+    if USE_CN:
+        available = {f.name for f in font_manager.fontManager.ttflist}
+        for name in candidates:
+            if name in available:
+                plt.rcParams["font.sans-serif"] = [name]
+                plt.rcParams["axes.unicode_minus"] = False
+                break
     plt.rcParams["font.size"] = 11
     plt.rcParams["axes.titlesize"] = 13
     plt.rcParams["axes.labelsize"] = 11
@@ -80,11 +95,11 @@ class PartitionVisualizer:
             filtered = self.partitions
 
         fig, ax = plt.subplots(figsize=(8, 8))
-        ax.set_title(f"上下文划分可视化 (迭代 {iteration})")
+        ax.set_title(_tf("上下文划分可视化 (迭代 {iteration})", "Context Partition Visualization (Iteration {iteration})", iteration=iteration))
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
-        ax.set_xlabel(f"特征 {dim_x}")
-        ax.set_ylabel(f"特征 {dim_y}")
+        ax.set_xlabel(_tf("特征 {dim}", "Feature {dim}", dim=dim_x))
+        ax.set_ylabel(_tf("特征 {dim}", "Feature {dim}", dim=dim_y))
 
         qualities = [p.estimated_quality for p in filtered]
         if qualities:
@@ -117,7 +132,7 @@ class PartitionVisualizer:
                     cy,
                     f"{partition.sample_count}",
                     color="white",
-                    fontsize=11,
+                    fontsize=9,
                     ha="center",
                     va="center",
                 )
@@ -125,7 +140,7 @@ class PartitionVisualizer:
         sm = plt.cm.ScalarMappable(cmap=cm.viridis, norm=norm)
         sm.set_array([])
         cbar = plt.colorbar(sm, ax=ax)
-        cbar.set_label("估计质量")
+        cbar.set_label(_t("估计质量", "Estimated Quality"))
 
         ax.grid(True)
         plt.tight_layout()
@@ -197,17 +212,19 @@ def render_assignment_matrix(
     table.set_fontsize(11)
     table.scale(1.6, 2.6)
 
-    title = f"{method_name} - 时间步 {step_index}"
-    subtitle = "单元格: 预测净收益\n(括号: Oracle 净收益)"
+    title = _tf("{method} - 时间步 {step}", "{method} - Step {step}", method=method_name, step=step_index)
+    subtitle = _t("单元格: 预测净收益\n(括号: Oracle 净收益)", "cell: predicted net\n(parentheses: Oracle net)")
     ax.set_title(title, fontsize=17, pad=16)
     fig.text(0.02, 0.93, subtitle, fontsize=12, ha="left", va="top")
 
     selected_pred_sum = sum(predicted_net.get(key, 0.0) for key in selected_set)
     selected_true_sum = sum(true_net.get(key, 0.0) for key in selected_set)
-    summary = (
-        f"已选分配: {len(selected_set)} | "
-        f"预测净收益总和 = {selected_pred_sum:.3f} | "
-        f"真实净收益总和 = {selected_true_sum:.3f}"
+    summary = _tf(
+        "已选分配: {count} | 预测净收益总和 = {pred:.3f} | 真实净收益总和 = {true:.3f}",
+        "Selected assignments: {count} | Predicted net sum = {pred:.3f} | True net sum = {true:.3f}",
+        count=len(selected_set),
+        pred=selected_pred_sum,
+        true=selected_true_sum,
     )
     fig.text(0.5, 0.04, summary, fontsize=13, ha="center", va="center")
 

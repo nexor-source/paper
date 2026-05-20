@@ -35,7 +35,7 @@ WORKER_COUNT_MAX = 12
 
 # Partition control
 MAX_PARTITION_DEPTH = 64
-PARTITION_SPLIT_THRESHOLD = 10
+PARTITION_SPLIT_THRESHOLD = 8
 PARTITION_MIN_SAMPLES = 6            # minimum samples before split is considered
 PARTITION_VARIANCE_THRESHOLD = 0.005 # variance gate for splitting
 
@@ -68,7 +68,7 @@ REPLICATION_COST = 0.21
 
 # UCB behaviour for the replicator
 REPLICATOR_USE_UCB = True
-REPLICATOR_UCB_COEF = 0.3
+REPLICATOR_UCB_COEF = 0.15
 REPLICATOR_UCB_MIN_PULLS = 1
 
 # Chapter 4's parameters
@@ -78,4 +78,4 @@ ENABLE_DP = False
 # 隐私预算 epsilon（越小隐私越强，噪声越大）
 DP_EPSILON = 1.0
 # DP-UCB 置信补偿项的权重系数
-DP_UCB_BETA = 0.5
+DP_UCB_BETA = 0.2
